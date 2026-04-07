@@ -23,27 +23,23 @@ export default function ProveedorSoporte() {
   const [tab, setTab] = useState('abierto')
   const [deletingId, setDeletingId] = useState(null)
 
-  // Modal principal: responder ticket
   const [modal, setModal] = useState(null)
   const [response, setResponse] = useState('')
   const [newStatus, setNewStatus] = useState('resuelto')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Modal secundario: editar credenciales
   const [showEditCreds, setShowEditCreds] = useState(false)
   const [creds, setCreds] = useState({})
   const [credsSaving, setCredsSaving] = useState(false)
   const [credsError, setCredsError] = useState('')
   const [credsSaved, setCredsSaved] = useState(false)
 
-  // Modal renovar
   const [renewModal, setRenewModal] = useState(null)
   const [renewDays, setRenewDays] = useState(30)
   const [renewSaving, setRenewSaving] = useState(false)
   const [renewError, setRenewError] = useState('')
 
-  // Modal anular
   const [cancelModal, setCancelModal] = useState(null)
   const [cancelNote, setCancelNote] = useState('')
   const [cancelSaving, setCancelSaving] = useState(false)
@@ -83,8 +79,7 @@ export default function ProveedorSoporte() {
     setModal(ticket)
     setResponse(ticket.provider_response || '')
     setNewStatus(ticket.status === 'abierto' ? 'en_revision' : ticket.status === 'en_revision' ? 'resuelto' : ticket.status)
-    setError('')
-    setCredsSaved(false)
+    setError(''); setCredsSaved(false)
   }
 
   function openEditCreds() {
@@ -127,11 +122,9 @@ export default function ProveedorSoporte() {
         user_id: modal.orders?.distributor_id,
         title: newStatus === 'resuelto' ? 'Ticket resuelto' : 'Respuesta de soporte',
         message: `Tu ticket #${modal.ticket_code} fue actualizado${credsSaved ? ' y las credenciales fueron actualizadas' : ''}.`,
-        type: newStatus === 'resuelto' ? 'success' : 'info',
-        ref_id: modal.id,
+        type: newStatus === 'resuelto' ? 'success' : 'info', ref_id: modal.id,
       })
-      setModal(null)
-      fetchTickets()
+      setModal(null); fetchTickets()
     } catch (e) { setError(e.message) }
     setSaving(false)
   }
@@ -152,8 +145,7 @@ export default function ProveedorSoporte() {
       if (renewModal.status !== 'resuelto') {
         await supabase.from('support_tickets').update({ status: 'resuelto', updated_at: new Date().toISOString() }).eq('id', renewModal.id)
       }
-      setRenewModal(null)
-      fetchTickets()
+      setRenewModal(null); fetchTickets()
     } catch (e) { setRenewError(e.message) }
     setRenewSaving(false)
   }
@@ -163,19 +155,42 @@ export default function ProveedorSoporte() {
     try {
       const order = cancelModal.orders
       const refund = calcRefund(order.price_paid, order.created_at, order.expires_at)
+
+      // 1. Cancelar el pedido
       await supabase.from('orders').update({ status: 'cancelado' }).eq('id', order.id)
+
+      // 2. Liberar el stock_item — usando is_sold y order_id (columnas reales de tu tabla)
       if (order.stock_item_id) {
-        await supabase.from('stock_items').update({ status: 'disponible', assigned_order_id: null }).eq('id', order.stock_item_id)
+        await supabase.from('stock_items')
+          .update({ is_sold: false, order_id: null })
+          .eq('id', order.stock_item_id)
       }
+
+      // 3. Reembolso en plataforma si aplica
       if (type === 'platform' && refund.refundAmount > 0) {
         const { data: balanceRow } = await supabase.from('balances').select('amount').eq('user_id', order.distributor_id).maybeSingle()
         const current = balanceRow?.amount || 0
-        await supabase.from('balances').upsert({ user_id: order.distributor_id, amount: Math.round((current + refund.refundAmount) * 100) / 100 }, { onConflict: 'user_id' })
-        await supabase.from('transactions').insert({ user_id: order.distributor_id, type: 'reembolso', amount: refund.refundAmount, description: `Reembolso proporcional — Pedido #${order.order_code} (${refund.remainingDays}d restantes de ${refund.totalDays}d)`, ref_id: order.id })
+        await supabase.from('balances').upsert(
+          { user_id: order.distributor_id, amount: Math.round((current + refund.refundAmount) * 100) / 100 },
+          { onConflict: 'user_id' }
+        )
+        await supabase.from('transactions').insert({
+          user_id: order.distributor_id, type: 'reembolso', amount: refund.refundAmount,
+          description: `Reembolso proporcional — Pedido #${order.order_code} (${refund.remainingDays}d restantes de ${refund.totalDays}d)`,
+          ref_id: order.id,
+        })
       }
-      const msg = type === 'platform' ? `Venta anulada. Se acreditaron $${refund.refundAmount} en tu saldo de plataforma.` : type === 'external' ? `Venta anulada. Recibirás un reembolso externo de $${refund.refundAmount}.` : cancelNote || 'Venta anulada sin reembolso.'
+
+      // 4. Cerrar ticket con respuesta
+      const msg = type === 'platform'
+        ? `Venta anulada. Se acreditaron $${refund.refundAmount} en tu saldo de plataforma.`
+        : type === 'external'
+        ? `Venta anulada. Recibirás un reembolso externo de $${refund.refundAmount}.`
+        : cancelNote || 'Venta anulada sin reembolso.'
+
       await supabase.from('support_tickets').update({ status: 'resuelto', provider_response: msg, updated_at: new Date().toISOString() }).eq('id', cancelModal.id)
       await supabase.from('notifications').insert({ user_id: order.distributor_id, title: 'Venta anulada', message: msg, type: 'warning', ref_id: order.id })
+
       setCancelDone(true)
       setTimeout(() => { setCancelModal(null); setCancelDone(false); fetchTickets() }, 2000)
     } catch (e) { setCancelError(e.message) }
@@ -192,7 +207,6 @@ export default function ProveedorSoporte() {
   return (
     <div>
       <PageHeader title="Soporte" subtitle="Tickets de tus distribuidores" />
-
       <div style={{ marginBottom: 16 }}>
         <Tabs
           tabs={[
@@ -201,17 +215,14 @@ export default function ProveedorSoporte() {
             { label: 'Resueltos', value: 'resuelto' },
             { label: 'Todos', value: 'all' },
           ]}
-          active={tab}
-          onChange={t => setTab(t)}
+          active={tab} onChange={t => setTab(t)}
         />
       </div>
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={28} /></div>
       ) : tickets.length === 0 ? (
-        <div className="card">
-          <EmptyState icon={IconHeadphones} title="Sin tickets" description="No hay tickets en esta categoría." />
-        </div>
+        <div className="card"><EmptyState icon={IconHeadphones} title="Sin tickets" description="No hay tickets en esta categoría." /></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
           {tickets.map(t => (
@@ -236,12 +247,11 @@ export default function ProveedorSoporte() {
                     <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', lineHeight: 1.8 }}>
                       {t.stock_item.email && <div>Email: {t.stock_item.email}</div>}
                       {t.stock_item.password && <div>Pass: {t.stock_item.password}</div>}
+                      {t.stock_item.url && <div>URL: {t.stock_item.url}</div>}
                       {t.stock_item.profile_name && <div>Perfil: {t.stock_item.profile_name}</div>}
                     </div>
                   )}
                 </div>
-
-                {/* Botones de acción */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
                   <button onClick={() => openTicket(t)} className="btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>
                     <IconEdit size={13} />Responder
@@ -254,12 +264,8 @@ export default function ProveedorSoporte() {
                     style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-red-bg)', border: '1px solid var(--status-red)', color: 'var(--status-red)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
                     <IconX size={13} />Anular venta
                   </button>
-                  {/* Botón eliminar — solo visible si está resuelto */}
                   {t.status === 'resuelto' && (
-                    <button
-                      onClick={() => deleteTicket(t.id)}
-                      disabled={deletingId === t.id}
-                      title="Eliminar ticket"
+                    <button onClick={() => deleteTicket(t.id)} disabled={deletingId === t.id}
                       style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', color: 'var(--ink-faint)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, opacity: deletingId === t.id ? 0.5 : 1 }}>
                       {deletingId === t.id ? <Spinner size={13} /> : <IconTrash size={13} />}
                       Eliminar
@@ -272,7 +278,7 @@ export default function ProveedorSoporte() {
         </div>
       )}
 
-      {/* ══ MODAL PRINCIPAL: RESPONDER TICKET ══ */}
+      {/* ══ MODAL: RESPONDER TICKET ══ */}
       <Modal open={!!modal} onClose={() => setModal(null)} title={`Ticket #${modal?.ticket_code}`} maxWidth="max-w-lg">
         {modal && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -281,13 +287,11 @@ export default function ProveedorSoporte() {
               <p style={{ color: 'var(--ink-muted)' }}>Pedido #{modal.orders?.order_code} · {modal.orders?.products?.name}</p>
               {modal.description && <p style={{ color: 'var(--ink-faint)', marginTop: 4 }}>{modal.description}</p>}
             </div>
-
             {activeCredFields.length > 0 && (
               <div style={{ border: '1px solid var(--surface-border)', borderRadius: 10, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 12px', background: 'var(--surface-overlay)' }}>
                   <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)' }}>
-                    Credenciales del pedido
-                    {credsSaved && <span style={{ marginLeft: 8, color: 'var(--status-green)', fontWeight: 600 }}>✓ Guardadas</span>}
+                    Credenciales{credsSaved && <span style={{ marginLeft: 8, color: 'var(--status-green)' }}>✓ Guardadas</span>}
                   </p>
                   <button onClick={openEditCreds}
                     style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, background: 'transparent', color: 'var(--ink-muted)', border: '1px solid var(--surface-border)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -301,7 +305,6 @@ export default function ProveedorSoporte() {
                 </div>
               </div>
             )}
-
             <div>
               <label className="label">Tu respuesta al distribuidor</label>
               <textarea className="input" rows={3} style={{ resize: 'none' }}
@@ -326,12 +329,12 @@ export default function ProveedorSoporte() {
         )}
       </Modal>
 
-      {/* ══ MODAL SECUNDARIO: EDITAR CREDENCIALES ══ */}
+      {/* ══ MODAL: EDITAR CREDENCIALES (encima del principal) ══ */}
       <Modal open={showEditCreds} onClose={() => setShowEditCreds(false)} title="Editar credenciales" maxWidth="max-w-md">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <p style={{ fontSize: 12, color: 'var(--status-yellow)', marginBottom: 4 }}>Los cambios se guardan inmediatamente al confirmar.</p>
           {Object.entries(creds).filter(([key]) => modal?.stock_item?.[key]).map(([key, val]) => {
-            const labels = { email: 'Email', password: 'Contraseña', url: 'URL', profile_name: 'Perfil', profile_pin: 'PIN', activation_code: 'Código de activación' }
+            const labels = { email: 'Email', password: 'Contraseña', url: 'URL', profile_name: 'Perfil', profile_pin: 'PIN', activation_code: 'Código' }
             return (
               <div key={key}>
                 <label className="label">{labels[key]}</label>
@@ -349,14 +352,14 @@ export default function ProveedorSoporte() {
         </div>
       </Modal>
 
-      {/* ══ MODAL: RENOVAR PEDIDO ══ */}
+      {/* ══ MODAL: RENOVAR ══ */}
       <Modal open={!!renewModal} onClose={() => setRenewModal(null)} title="Renovar pedido" maxWidth="max-w-sm">
         {renewModal && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
               <p style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{renewModal.orders?.products?.name}</p>
               <p style={{ color: 'var(--ink-muted)' }}>Pedido #{renewModal.orders?.order_code}</p>
-              {renewModal.orders?.expires_at && <p style={{ color: 'var(--ink-faint)', marginTop: 4 }}>Vence: {new Date(renewModal.orders.expires_at).toLocaleDateString('es-PE')}</p>}
+              {renewModal.orders?.expires_at && <p style={{ color: 'var(--ink-faint)', marginTop: 4 }}>Vence: {new Date(renewModal.orders.expires_at).toLocaleDateString()}</p>}
             </div>
             <div>
               <label className="label">Días a agregar</label>
@@ -368,14 +371,14 @@ export default function ProveedorSoporte() {
                   </button>
                 ))}
               </div>
-              <input type="number" min={1} max={365} className="input" value={renewDays} onChange={e => setRenewDays(Number(e.target.value))} placeholder="Días personalizados" />
+              <input type="number" min={1} max={365} className="input" value={renewDays} onChange={e => setRenewDays(Number(e.target.value))} />
             </div>
             {renewModal.orders?.expires_at && (
               <div style={{ background: 'var(--status-green-bg)', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: 'var(--status-green)' }}>
                 Nueva fecha: <strong>{(() => {
                   const base = new Date(renewModal.orders.expires_at) < new Date() ? new Date() : new Date(renewModal.orders.expires_at)
                   base.setDate(base.getDate() + Number(renewDays))
-                  return base.toLocaleDateString('es-PE')
+                  return base.toLocaleDateString()
                 })()}</strong>
               </div>
             )}
@@ -398,7 +401,7 @@ export default function ProveedorSoporte() {
               <IconCheck size={20} style={{ color: 'var(--status-green)' }} />
             </div>
             <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, color: 'var(--ink)' }}>Venta anulada</p>
-            <p style={{ fontSize: 13, color: 'var(--ink-muted)', marginTop: 4 }}>El distribuidor fue notificado.</p>
+            <p style={{ fontSize: 13, color: 'var(--ink-muted)', marginTop: 4 }}>Stock liberado. Distribuidor notificado.</p>
           </div>
         ) : (() => {
           const order = cancelModal.orders
@@ -427,7 +430,7 @@ export default function ProveedorSoporte() {
                 </div>
               )}
               <div>
-                <label className="label">Nota para el distribuidor (opcional)</label>
+                <label className="label">Nota (opcional)</label>
                 <textarea className="input" rows={2} style={{ resize: 'none' }} placeholder="Motivo de la anulación..." value={cancelNote} onChange={e => setCancelNote(e.target.value)} />
               </div>
               {cancelError && <Alert type="error">{cancelError}</Alert>}

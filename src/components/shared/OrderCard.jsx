@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { formatDate, formatUSD, getLogoPath } from '@/utils'
 import { buildWhatsAppUrl } from '@/lib/whatsapp'
-import { Modal, CopyField } from '@/components/ui'
+import { Modal, CopyField, Alert, Spinner } from '@/components/ui'
+import { supabase } from '@/lib/supabase'
+import PhoneInput from './PhoneInput'
 import {
   IconWhatsApp, IconHeadphones, IconSend, IconClock,
-  IconMail, IconKey, IconLink, IconHash, IconUser, IconRefreshCw, IconChevronDown, IconAlertCircle
+  IconMail, IconKey, IconLink, IconHash, IconUser, IconRefreshCw, IconChevronDown, IconAlertCircle, IconEdit
 } from '@/assets/icons'
 import SupportForm from './SupportForm'
 
@@ -48,6 +50,11 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
   const [expanded, setExpanded] = useState(false)
   const [showSupport, setShowSupport] = useState(false)
   const [renewDismissed, setRenewDismissed] = useState(false)
+  const [showEditClient, setShowEditClient] = useState(false)
+  const [clientName, setClientName] = useState('')
+  const [clientPhone, setClientPhone] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
   const item = order.stock_items
   const product = order.products
@@ -57,11 +64,7 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
   const pillStyle = days !== null ? getDaysPillStyle(days) : null
   const accentColor = getPlatformColor(platform?.name || '')
   const sc = STATUS_CONFIG[order.status] || STATUS_CONFIG.expirado
-
-  // Mostrar banner de renovación si activo y quedan ≤7 días, o ya venció
   const showRenewalBanner = !renewDismissed && order.status === 'activo' && days !== null && days <= 7
-
-  // Mostrar botón renovar: siempre en activo, también en expirado
   const showRenewBtn = order.status === 'activo' || order.status === 'expirado'
 
   function handleSendCreds() {
@@ -99,68 +102,69 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
     window.open(url, '_blank')
   }
 
-  // Botón de acción circular reutilizable
+  function openEditClient() {
+    setClientName(order.client_name || '')
+    setClientPhone(order.client_whatsapp || '')
+    setEditError('')
+    setShowEditClient(true)
+  }
+
+  async function saveClientInfo() {
+    setEditSaving(true); setEditError('')
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ client_name: clientName.trim() || null, client_whatsapp: clientPhone.trim() || null })
+        .eq('id', order.id)
+      if (error) throw error
+      onCredentialsUpdated?.()
+      setShowEditClient(false)
+    } catch (e) { setEditError(e.message) }
+    setEditSaving(false)
+  }
+
   const ActionBtn = ({ onClick, title, bg, color, border, children }) => (
-    <button
-      onClick={e => { e.stopPropagation(); onClick() }}
-      title={title}
-      style={{
-        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-        background: bg || 'var(--surface-overlay)',
-        border: border || '1px solid var(--surface-border)',
-        color: color || 'var(--ink-faint)',
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
+    <button onClick={e => { e.stopPropagation(); onClick() }} title={title}
+      style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: bg || 'var(--surface-overlay)', border: border || '1px solid var(--surface-border)', color: color || 'var(--ink-faint)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       {children}
     </button>
   )
 
+  const credFields = item ? [
+    { key: 'email', label: 'Correo', icon: IconMail },
+    { key: 'password', label: 'Contraseña', icon: IconKey, hidden: true },
+    { key: 'url', label: 'URL', icon: IconLink },
+    { key: 'profile_name', label: 'Perfil', icon: IconUser },
+    { key: 'profile_pin', label: 'PIN', icon: IconHash, hidden: true },
+    { key: 'activation_code', label: 'Código', icon: IconHash },
+  ].filter(f => item[f.key]) : []
+
   return (
     <>
-      <div style={{
-        background: 'var(--surface-raised)',
-        border: '1px solid var(--surface-border)',
-        borderLeft: `3px solid ${sc.color}`,
-        borderRadius: '0 12px 12px 0',
-        overflow: 'hidden',
-      }}>
+      <div style={{ background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', borderLeft: `3px solid ${sc.color}`, borderRadius: '0 12px 12px 0', overflow: 'hidden' }}>
 
-        {/* ── RENEWAL BANNER ── */}
         {showRenewalBanner && (
-          <div style={{
-            background: days <= 0 ? 'var(--status-red-bg)' : 'var(--status-yellow-bg)',
-            borderBottom: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`,
-            padding: '7px 14px',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
+          <div style={{ background: days <= 0 ? 'var(--status-red-bg)' : 'var(--status-yellow-bg)', borderBottom: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
             <IconAlertCircle size={13} style={{ color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)', flexShrink: 0 }} />
             <p style={{ flex: 1, fontSize: 12, fontWeight: 500, color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)' }}>
               {days <= 0 ? 'Venció. ¿Deseas renovarlo?' : `Vence en ${days}d. ¿Confirmas renovación?`}
             </p>
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-              <button
-                onClick={e => { e.stopPropagation(); handleRenewWhatsApp() }}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 7, background: '#25d366', border: 'none', color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
-              >
+              <button onClick={e => { e.stopPropagation(); handleRenewWhatsApp() }}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 7, background: '#25d366', border: 'none', color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                 <IconWhatsApp size={11} /> Renovar
               </button>
-              <button
-                onClick={e => { e.stopPropagation(); setRenewDismissed(true) }}
-                style={{ padding: '3px 10px', borderRadius: 7, background: 'transparent', border: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`, color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)', fontSize: 11, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
-              >
+              <button onClick={e => { e.stopPropagation(); setRenewDismissed(true) }}
+                style={{ padding: '3px 10px', borderRadius: 7, background: 'transparent', border: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`, color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)', fontSize: 11, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
                 Descartar
               </button>
             </div>
           </div>
         )}
 
-        {/* ── COMPACT ROW ── */}
-        <div
-          onClick={() => hasCreds && setExpanded(e => !e)}
-          style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, cursor: hasCreds ? 'pointer' : 'default' }}
-        >
-          {/* Logo */}
+        <div onClick={() => hasCreds && setExpanded(e => !e)}
+          style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, cursor: hasCreds ? 'pointer' : 'default' }}>
+
           <div style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: `${accentColor}15`, border: `1px solid ${accentColor}25`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             {platform?.logo_filename
               ? <img src={getLogoPath(platform.logo_filename)} alt={platform.name} style={{ width: 26, height: 26, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
@@ -168,15 +172,10 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
             }
           </div>
 
-          {/* Title + meta */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
-                {product?.name}
-              </span>
-              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 99, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
-                {sc.label}
-              </span>
+              <span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{product?.name}</span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 99, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>{sc.label}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--ink-faint)' }}>#{order.order_code}</span>
@@ -193,67 +192,47 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
             </div>
           </div>
 
-          {/* Right: price + action buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <div style={{ textAlign: 'right', marginRight: 2 }}>
               <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>{formatUSD(order.price_paid)}</p>
               <p style={{ fontSize: 10, color: 'var(--ink-faint)' }}>{formatDate(order.created_at)}</p>
             </div>
-
-            {/* WhatsApp enviar credenciales */}
             {hasCreds && order.client_whatsapp && (
               <ActionBtn onClick={handleSendCreds} title="Enviar credenciales" bg="#25d366" color="white" border="none">
                 <IconWhatsApp size={14} />
               </ActionBtn>
             )}
-
-            {/* Notificar proveedor (pendiente) */}
             {!hasCreds && order.status === 'pendiente_credenciales' && (
               <ActionBtn onClick={handleNotifyProvider} title="Notificar proveedor">
                 <IconSend size={13} />
               </ActionBtn>
             )}
-
-            {/* Renovar — activo o expirado */}
             {showRenewBtn && (
-              <ActionBtn
-                onClick={handleRenewWhatsApp}
-                title={order.status === 'expirado' ? 'Contactar proveedor para renovar' : 'Solicitar renovación'}
-                bg="var(--status-green-bg)"
-                color="var(--status-green)"
-                border="1px solid var(--status-green)"
-              >
+              <ActionBtn onClick={handleRenewWhatsApp} title="Solicitar renovación"
+                bg="var(--status-green-bg)" color="var(--status-green)" border="1px solid var(--status-green)">
                 <IconRefreshCw size={13} />
               </ActionBtn>
             )}
-
-            {/* Soporte */}
+            <ActionBtn onClick={openEditClient} title="Editar datos del cliente">
+              <IconEdit size={13} />
+            </ActionBtn>
             <ActionBtn onClick={() => setShowSupport(true)} title="Soporte">
               <IconHeadphones size={13} />
             </ActionBtn>
-
-            {/* Expandir credenciales */}
             {hasCreds && (
-              <button
-                onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
-                style={{ width: 32, height: 32, borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-faint)', flexShrink: 0, transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0)' }}
-                title="Ver credenciales"
-              >
+              <button onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
+                style={{ width: 32, height: 32, borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-faint)', flexShrink: 0, transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0)' }}>
                 <IconChevronDown size={15} />
               </button>
             )}
           </div>
         </div>
 
-        {/* ── EXPANDED CREDENTIALS ── */}
         {expanded && hasCreds && (
           <div style={{ borderTop: '1px solid var(--surface-border)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {item?.email && <CopyField value={item.email} icon={IconMail} label="Correo" />}
-            {item?.password && <CopyField value={item.password} icon={IconKey} label="Contraseña" hidden />}
-            {item?.url && <CopyField value={item.url} icon={IconLink} label="URL" />}
-            {item?.profile_name && <CopyField value={item.profile_name} icon={IconUser} label="Perfil" />}
-            {item?.profile_pin && <CopyField value={item.profile_pin} icon={IconHash} label="PIN" hidden />}
-            {item?.activation_code && <CopyField value={item.activation_code} icon={IconHash} label="Código" />}
+            {credFields.map(f => (
+              <CopyField key={f.key} value={item[f.key]} icon={f.icon} label={f.label} hidden={f.hidden} />
+            ))}
             {item?.extra_notes && (
               <div style={{ background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5 }}>{item.extra_notes}</div>
             )}
@@ -277,7 +256,32 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
         )}
       </div>
 
-      {/* Support modal */}
+      {/* Modal: Editar datos del cliente */}
+      <Modal open={showEditClient} onClose={() => setShowEditClient(false)} title="Editar datos del cliente" maxWidth="max-w-sm">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
+            Actualiza el nombre o número de tu cliente. El próximo envío de credenciales usará el número actualizado.
+          </p>
+          <div>
+            <label className="label">Nombre del cliente</label>
+            <input className="input" placeholder="Nombre del cliente"
+              value={clientName} onChange={e => setClientName(e.target.value)} />
+          </div>
+          <PhoneInput
+            label="WhatsApp del cliente"
+            value={clientPhone}
+            onChange={setClientPhone}
+          />
+          {editError && <Alert type="error">{editError}</Alert>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setShowEditClient(false)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
+            <button onClick={saveClientInfo} disabled={editSaving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+              {editSaving ? <Spinner size={15} /> : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {showSupport && (
         <Modal open={true} onClose={() => setShowSupport(false)} title="Abrir ticket de soporte">
           <SupportForm order={order} onClose={() => setShowSupport(false)} />

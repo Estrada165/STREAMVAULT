@@ -1,17 +1,44 @@
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
+export const DEFAULT_TEMPLATE = `› Hola {nombre_cliente}
+
+› Tu acceso a {plataforma} está listo
+
+› Has sido unido al grupo familiar
+
+• Correo: {correo}
+• Contraseña: {contrasena}
+• Perfil: {perfil}
+• PIN: {pin}
+• URL: {url}
+• Código: {codigo}
+
+› Revisa tu correo y acepta la invitación
+
+› Duración: {duracion} días
+› Vence: {fecha_vencimiento}
+› Pedido: {id_pedido}
+
+› Soporte: Escríbeme ante cualquier problema`
+
 /**
- * Builds a WhatsApp URL with pre-filled message from a template
+ * Builds a WhatsApp URL with pre-filled message from a template.
+ * Falls back to DEFAULT_TEMPLATE if template is empty/null.
  */
 export function buildWhatsAppUrl(phone, template, variables) {
-  const message = fillTemplate(template, variables)
-  const cleanPhone = phone.replace(/\D/g, '')
+  const tpl = (template && template.trim()) ? template : DEFAULT_TEMPLATE
+  const message = fillTemplate(tpl, variables)
+
+  const cleanPhone = phone.startsWith('+')
+    ? '+' + phone.slice(1).replace(/\D/g, '')
+    : phone.replace(/\D/g, '')
+
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`
 }
 
 /**
- * Replaces {variable} placeholders in template, removing empty lines
+ * Replaces {variable} placeholders in template, removing empty lines.
  */
 export function fillTemplate(template, variables) {
   let result = template
@@ -36,40 +63,18 @@ export function fillTemplate(template, variables) {
     result = result.replaceAll(key, value)
   }
 
-  // Remove lines that only contain an emoji + empty value
+  // eliminar líneas vacías tipo "Campo:"
   result = result
     .split('\n')
     .filter(line => {
       const trimmed = line.trim()
-      // Remove lines like "📧 Correo: " or "👤 Perfil: " with nothing after colon
+      if (!trimmed.includes(':')) return true
       const afterColon = trimmed.split(':').slice(1).join(':').trim()
-      if (trimmed.includes(':') && afterColon === '') return false
-      return true
+      return afterColon !== ''
     })
     .join('\n')
 
-  // Clean up multiple blank lines
-  result = result.replace(/\n{3,}/g, '\n\n')
+  result = result.replace(/\n{3,}/g, '\n\n').trim()
 
   return result
 }
-
-/**
- * Default template
- */
-export const DEFAULT_TEMPLATE = `🎬 *Hola {nombre_cliente}!*
-
-Tu acceso a *{plataforma}* ya está listo 🚀
-
-📧 Correo: {correo}
-🔑 Contraseña: {contrasena}
-👤 Perfil: {perfil}
-🔢 PIN: {pin}
-🌐 URL: {url}
-🔐 Código: {codigo}
-
-⏳ Duración: {duracion} días
-📅 Vence: {fecha_vencimiento}
-🆔 Pedido: {id_pedido}
-
-Ante cualquier problema escríbeme 🙌`
