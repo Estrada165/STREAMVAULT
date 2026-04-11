@@ -5,16 +5,12 @@ export const DEFAULT_TEMPLATE = `› Hola {nombre_cliente}
 
 › Tu acceso a {plataforma} está listo
 
-› Has sido unido al grupo familiar
-
 • Correo: {correo}
 • Contraseña: {contrasena}
 • Perfil: {perfil}
 • PIN: {pin}
 • URL: {url}
 • Código: {codigo}
-
-› Revisa tu correo y acepta la invitación
 
 › Duración: {duracion} días
 › Vence: {fecha_vencimiento}
@@ -63,7 +59,6 @@ export function fillTemplate(template, variables) {
     result = result.replaceAll(key, value)
   }
 
-  // eliminar líneas vacías tipo "Campo:"
   result = result
     .split('\n')
     .filter(line => {

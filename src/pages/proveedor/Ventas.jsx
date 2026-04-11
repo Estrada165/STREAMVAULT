@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, Badge, Tabs } from '@/components/ui'
-import { IconSearch, IconDownload, IconEdit } from '@/assets/icons'
-import { formatUSD, formatDateTime, getStatusColor, getStatusLabel, getLogoPath } from '@/utils'
+import { IconSearch, IconDownload, IconEdit, IconRefreshCw } from '@/assets/icons'
+import { formatUSD, formatDateTime, formatDate, getStatusColor, getStatusLabel, getLogoPath, daysRemaining } from '@/utils'
 
 export default function ProveedorVentas() {
   const { provider } = useAuth()
@@ -12,6 +12,9 @@ export default function ProveedorVentas() {
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState('all')
   const [modal, setModal] = useState(null)
+  const [renewModal, setRenewModal] = useState(null) // order to renew
+  const [renewDays, setRenewDays] = useState(30)
+  const [renewBalance, setRenewBalance] = useState(null) // distributor balance
   const [credsForm, setCredsForm] = useState({ email: '', password: '', url: '', profile_name: '', profile_pin: '', activation_code: '', extra_notes: '' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -122,6 +125,62 @@ export default function ProveedorVentas() {
     setSaving(false)
   }
 
+  async function openRenew(order) {
+    setRenewDays(30)
+    setSaveError('')
+    // Fetch distributor balance
+    const { data: bal } = await supabase
+      .from('balances').select('amount_usd').eq('user_id', order.distributor_id).maybeSingle()
+    setRenewBalance(parseFloat(bal?.amount_usd || 0))
+    setRenewModal(order)
+  }
+
+  async function confirmRenew() {
+    const price = parseFloat(renewModal.price_paid)
+    if (renewBalance < price) return setSaveError(`Saldo insuficiente. El distribuidor tiene ${formatUSD(renewBalance)} y el costo es ${formatUSD(price)}.`)
+    setSaving(true); setSaveError('')
+    try {
+      // Calculate new expiry: extend from current expiry if still active, or from today
+      const currentExpiry = renewModal.expires_at ? new Date(renewModal.expires_at) : new Date()
+      const base = currentExpiry > new Date() ? currentExpiry : new Date()
+      base.setDate(base.getDate() + parseInt(renewDays))
+
+      // Update order expiry and status
+      const { error: oErr } = await supabase.from('orders').update({
+        expires_at: base.toISOString(),
+        status: 'activo',
+        updated_at: new Date().toISOString(),
+      }).eq('id', renewModal.id)
+      if (oErr) throw oErr
+
+      // Deduct balance
+      const newBal = renewBalance - price
+      await supabase.from('balances').update({ amount_usd: newBal }).eq('user_id', renewModal.distributor_id)
+
+      // Record transaction
+      await supabase.from('transactions').insert({
+        user_id: renewModal.distributor_id,
+        type: 'compra',
+        amount_usd: -price,
+        ref_order_id: renewModal.id,
+        description: `Renovación: ${renewModal.products?.name} (+${renewDays} días)`,
+      })
+
+      // Notify distributor
+      await supabase.from('notifications').insert({
+        user_id: renewModal.distributor_id,
+        title: 'Suscripción renovada',
+        message: `Tu pedido ${renewModal.order_code} fue renovado por ${renewDays} días. Nueva fecha de vencimiento: ${formatDate(base.toISOString())}`,
+        type: 'success',
+        ref_id: renewModal.id,
+      })
+
+      setRenewModal(null)
+      fetchOrders()
+    } catch (e) { setSaveError(e.message) }
+    setSaving(false)
+  }
+
   function exportCSV() {
     const rows = [['Pedido', 'Producto', 'Distribuidor', 'Cliente', 'Precio', 'Estado', 'Fecha']]
     filtered.forEach(o => rows.push([o.order_code, o.products?.name, o.user?.full_name || o.user?.email, o.client_name, o.price_paid, o.status, new Date(o.created_at).toLocaleDateString('es-PE')]))
@@ -206,15 +265,23 @@ export default function ProveedorVentas() {
                 <td><Badge color={getStatusColor(o.status)} dot>{getStatusLabel(o.status)}</Badge></td>
                 <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{formatDateTime(o.created_at)}</td>
                 <td>
-                  <button onClick={() => openCredentials(o)} className="btn-secondary"
-                    style={{ fontSize: 11, padding: '5px 10px', gap: 4,
-                      background: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-bg)' : undefined,
-                      borderColor: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-border)' : undefined,
-                      color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined,
-                    }}>
-                    <IconEdit size={12} />
-                    {o.status === 'pendiente_credenciales' ? 'Cargar' : 'Editar'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => openCredentials(o)} className="btn-secondary"
+                      style={{ fontSize: 11, padding: '5px 10px', gap: 4,
+                        background: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-bg)' : undefined,
+                        borderColor: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-border)' : undefined,
+                        color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined,
+                      }}>
+                      <IconEdit size={12} />
+                      {o.status === 'pendiente_credenciales' ? 'Cargar' : 'Editar'}
+                    </button>
+                    {(o.status === 'activo' || o.status === 'expirado') && (
+                      <button onClick={() => openRenew(o)} className="btn-secondary"
+                        style={{ fontSize: 11, padding: '5px 10px', gap: 4, color: 'var(--status-green)', borderColor: 'var(--status-green-border)', background: 'var(--status-green-bg)' }}>
+                        <IconRefreshCw size={12} />Renovar
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -276,6 +343,84 @@ export default function ProveedorVentas() {
               <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
               <button onClick={saveCredentials} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
                 {saving ? <Spinner size={15} /> : 'Guardar y notificar'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+      {/* Renew modal */}
+      <Modal open={!!renewModal} onClose={() => { setRenewModal(null); setSaveError('') }} title={`Renovar — ${renewModal?.order_code}`} maxWidth="max-w-sm">
+        {renewModal && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Order info */}
+            <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '12px 14px' }}>
+              <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13 }}>{renewModal.products?.name}</p>
+              <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>Cliente: {renewModal.client_name || '—'}</p>
+              {renewModal.expires_at && (
+                <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>
+                  Vence actualmente: <strong style={{ color: 'var(--ink)' }}>{formatDate(renewModal.expires_at)}</strong>
+                </p>
+              )}
+            </div>
+
+            {/* Distributor balance */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 14px', borderRadius: 10,
+              background: renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green-bg)' : 'var(--status-red-bg)',
+              border: `1px solid ${renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green-border)' : 'var(--status-red-border)'}`,
+            }}>
+              <div>
+                <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Saldo del distribuidor</p>
+                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green)' : 'var(--status-red)' }}>
+                  {formatUSD(renewBalance)}
+                </p>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Costo renovación</p>
+                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>
+                  {formatUSD(renewModal.price_paid)}
+                </p>
+              </div>
+            </div>
+
+            {renewBalance < parseFloat(renewModal.price_paid) && (
+              <Alert type="error">
+                Saldo insuficiente. El distribuidor tiene {formatUSD(renewBalance)} y la renovación cuesta {formatUSD(renewModal.price_paid)}. Recárgale saldo primero desde la sección Distribuidores.
+              </Alert>
+            )}
+
+            {/* Days selector */}
+            <div>
+              <label className="label">Días a agregar</label>
+              <select className="input" value={renewDays} onChange={e => setRenewDays(e.target.value)}>
+                {[7, 15, 30, 60, 90].map(d => (
+                  <option key={d} value={d}>{d} días</option>
+                ))}
+              </select>
+              {renewModal.expires_at && (
+                <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 5 }}>
+                  Nueva fecha de vencimiento: <strong style={{ color: 'var(--ink)' }}>
+                    {(() => {
+                      const base = new Date(renewModal.expires_at) > new Date() ? new Date(renewModal.expires_at) : new Date()
+                      base.setDate(base.getDate() + parseInt(renewDays))
+                      return formatDate(base.toISOString())
+                    })()}
+                  </strong>
+                </p>
+              )}
+            </div>
+
+            {saveError && <Alert type="error">{saveError}</Alert>}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setRenewModal(null); setSaveError('') }} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
+              <button
+                onClick={confirmRenew}
+                disabled={saving || renewBalance < parseFloat(renewModal.price_paid)}
+                className="btn-primary"
+                style={{ flex: 1, justifyContent: 'center', background: 'var(--status-green)', opacity: renewBalance < parseFloat(renewModal.price_paid) ? 0.4 : 1 }}>
+                {saving ? <Spinner size={15} /> : `Renovar y descontar ${formatUSD(renewModal.price_paid)}`}
               </button>
             </div>
           </div>
