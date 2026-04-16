@@ -26,7 +26,7 @@ export default function ProveedorProductos() {
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState({
     platform_id: '', name: '', delivery_type: 'perfil',
-    delivery_mode: 'stock', price_pen: '', duration_days: 30,
+    delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
     terms: '', warranty: '', what_includes: ''
   })
   const [saving, setSaving] = useState(false)
@@ -60,7 +60,7 @@ export default function ProveedorProductos() {
   const usdFromForm = penToUsd(parseFloat(form.price_pen) || 0)
 
   function openCreate() {
-    setForm({ platform_id: platforms[0]?.id || '', name: '', delivery_type: 'perfil', delivery_mode: 'stock', price_pen: '', duration_days: 30, terms: '', warranty: '', what_includes: '' })
+    setForm({ platform_id: platforms[0]?.id || '', name: '', delivery_type: 'perfil', delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '', terms: '', warranty: '', what_includes: '' })
     setError('')
     setModal({ type: 'form' })
   }
@@ -69,8 +69,8 @@ export default function ProveedorProductos() {
     setForm({
       platform_id: p.platform_id, name: p.name, delivery_type: p.delivery_type,
       delivery_mode: p.delivery_mode, price_pen: (p.price_usd * rate).toFixed(2),
-      duration_days: p.duration_days, terms: p.terms || '',
-      warranty: p.warranty || '', what_includes: p.what_includes || '',
+      duration_days: p.duration_days, stock_qty: p.stock_qty ?? '',
+      terms: p.terms || '', warranty: p.warranty || '', what_includes: p.what_includes || '',
     })
     setError('')
     setModal({ type: 'form', data: p })
@@ -89,6 +89,7 @@ export default function ProveedorProductos() {
         platform_id: form.platform_id, name: form.name,
         delivery_type: form.delivery_type, delivery_mode: form.delivery_mode,
         price_usd: priceUsd, duration_days: parseInt(form.duration_days),
+        stock_qty: form.delivery_mode === 'pedido' && form.stock_qty !== '' ? parseInt(form.stock_qty) : null,
         terms: form.terms || null, warranty: form.warranty || null,
         what_includes: form.what_includes || null, provider_id: provider.id,
       }
@@ -241,6 +242,22 @@ export default function ProveedorProductos() {
               ))}
             </div>
           </div>
+
+          {/* stock_qty — only for pedido mode */}
+          {form.delivery_mode === 'pedido' && (
+            <div>
+              <label className="label">Disponibilidad (opcional)</label>
+              <input
+                type="number" min="0" className="input"
+                placeholder="Ej: 5 — dejar vacío para sin límite"
+                value={form.stock_qty}
+                onChange={e => setForm(f => ({ ...f, stock_qty: e.target.value }))}
+              />
+              <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4, lineHeight: 1.5 }}>
+                Vacío = sin límite (siempre disponible) · <strong>0</strong> = agotado (oculta el botón de pedir) · <strong>N</strong> = muestra "Pedido: N" en la tienda
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="label">Términos y condiciones</label>

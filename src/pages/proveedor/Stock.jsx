@@ -44,6 +44,7 @@ export default function ProveedorStock() {
 
     if (err) { console.error('Stock fetch error:', err); setLoadingStock(false); return }
 
+    // If sold, fetch order info separately
     let ordersMap = {}
     if (isSold && data?.length) {
       const orderIds = data.map(s => s.order_id).filter(Boolean)
@@ -78,17 +79,16 @@ export default function ProveedorStock() {
     setSaving(true); setError('')
     try {
       const payload = {
-        email: form.email || null,
-        password: form.password || null,
-        url: form.url || null,
-        profile_name: form.profile_name || null,
-        profile_pin: form.profile_pin || null,
-        activation_code: form.activation_code || null,
+        email: form.email || null, password: form.password || null,
+        url: form.url || null, profile_name: form.profile_name || null,
+        profile_pin: form.profile_pin || null, activation_code: form.activation_code || null,
         extra_notes: form.extra_notes || null,
       }
       if (modal?.data) {
         const { error: err } = await supabase.from('stock_items').update(payload).eq('id', modal.data.id)
         if (err) throw err
+
+        // If this item is linked to an order, notify distributor
         if (modal.data.order_id) {
           const { data: ord } = await supabase.from('orders').select('distributor_id, order_code').eq('id', modal.data.order_id).maybeSingle()
           if (ord) {
@@ -112,17 +112,21 @@ export default function ProveedorStock() {
 
   async function deleteItem(id) {
     if (!confirm('¿Eliminar este item de stock?')) return
-    await supabase.from('stock_items').delete().eq('id', id).eq('is_sold', false)
+    // No filtramos por is_sold para permitir borrar items de órdenes canceladas
+    const { error: delErr } = await supabase.from('stock_items').delete().eq('id', id)
+    if (delErr) {
+      alert('Error al eliminar: ' + delErr.message)
+      return
+    }
     fetchStock()
   }
 
   const dt = selectedProduct?.delivery_type
-  const showEmail = ['cuenta_completa', 'perfil', 'iptv', 'codigo'].includes(dt) || true // siempre opcional
+  const showEmail = ['cuenta_completa', 'perfil', 'iptv'].includes(dt)
   const showPassword = ['cuenta_completa', 'perfil', 'iptv'].includes(dt)
-  // URL ahora aparece en TODOS los tipos (útil para bots de códigos, IPTV, etc.)
-  const showUrl = true
+  const showUrl = dt === 'iptv'
   const showProfile = dt === 'perfil'
-  const showCode = ['codigo', 'activacion_tv'].includes(dt)
+  const showCode = dt === 'codigo'
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={28} /></div>
 
@@ -148,7 +152,7 @@ export default function ProveedorStock() {
                   width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 10,
                   border: '1px solid', cursor: 'pointer', transition: 'all 0.15s',
                   background: selectedProduct?.id === p.id ? 'var(--surface-overlay)' : 'transparent',
-                  borderColor: selectedProduct?.id === p.id ? 'var(--surface-border)' : 'transparent',
+                  borderColor: selectedProduct?.id === p.id ? 'var(--surface-border-strong)' : 'transparent',
                   color: selectedProduct?.id === p.id ? 'var(--ink)' : 'var(--ink-muted)',
                 }}>
                 <p style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
@@ -195,7 +199,7 @@ export default function ProveedorStock() {
                       <td>
                         <div style={{ fontSize: 12, lineHeight: 1.7 }}>
                           {item.email && <p style={{ fontFamily: 'DM Mono, monospace', color: 'var(--ink)' }}>{item.email}</p>}
-                          {item.url && <p style={{ fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', fontSize: 11 }}>{item.url.length > 40 ? item.url.slice(0, 40) + '...' : item.url}</p>}
+                          {item.url && <p style={{ fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', fontSize: 11 }}>{item.url.slice(0, 40)}...</p>}
                           {item.profile_name && <p style={{ color: 'var(--ink-muted)' }}>Perfil: {item.profile_name}</p>}
                           {item.activation_code && <p style={{ fontFamily: 'DM Mono, monospace', color: 'var(--ink)' }}>{item.activation_code}</p>}
                           {item.extra_notes && <p style={{ color: 'var(--ink-faint)', fontStyle: 'italic', fontSize: 11 }}>{item.extra_notes.slice(0, 50)}</p>}
@@ -217,7 +221,8 @@ export default function ProveedorStock() {
                           <button onClick={() => openEdit(item)} className="btn-ghost" style={{ padding: '5px 8px' }}>
                             <IconEdit size={13} />
                           </button>
-                          {!item.is_sold && (
+                          {/* Show delete for all available items, including ones released from cancelled orders */}
+                          {tab === 'available' && (
                             <button onClick={() => deleteItem(item.id)} className="btn-ghost" style={{ padding: '5px 8px', color: 'var(--status-red)' }}>
                               <IconTrash size={13} />
                             </button>
@@ -237,17 +242,13 @@ export default function ProveedorStock() {
       <Modal open={modal?.type === 'form'} onClose={() => setModal(null)}
         title={modal?.data ? 'Editar credenciales' : `Agregar stock — ${selectedProduct?.name}`}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-          {/* Email — para cuenta_completa, perfil, iptv */}
-          {['cuenta_completa', 'perfil', 'iptv'].includes(dt) && (
+          {showEmail && (
             <div>
               <label className="label">Correo</label>
               <input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="correo@ejemplo.com"
                 value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
             </div>
           )}
-
-          {/* Contraseña — para cuenta_completa, perfil, iptv */}
           {showPassword && (
             <div>
               <label className="label">Contraseña</label>
@@ -255,16 +256,13 @@ export default function ProveedorStock() {
                 value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
             </div>
           )}
-
-          {/* URL — disponible para TODOS los tipos */}
-          <div>
-            <label className="label">URL <span style={{ fontWeight: 400, color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>(opcional)</span></label>
-            <input className="input" style={{ fontFamily: 'DM Mono, monospace', fontSize: 12 }}
-              placeholder="https://... (para IPTV, bots de código, activaciones, etc.)"
-              value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
-          </div>
-
-          {/* Perfil — solo para tipo perfil */}
+          {showUrl && (
+            <div>
+              <label className="label">URL</label>
+              <input className="input" style={{ fontFamily: 'DM Mono, monospace', fontSize: 12 }} placeholder="http://..."
+                value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
+            </div>
+          )}
           {showProfile && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div>
@@ -279,8 +277,6 @@ export default function ProveedorStock() {
               </div>
             </div>
           )}
-
-          {/* Código — para codigo y activacion_tv */}
           {showCode && (
             <div>
               <label className="label">Código único</label>
@@ -288,15 +284,17 @@ export default function ProveedorStock() {
                 value={form.activation_code} onChange={e => setForm(f => ({ ...f, activation_code: e.target.value }))} />
             </div>
           )}
-
-          {/* Notas */}
+          {dt === 'activacion_tv' && (
+            <div style={{ background: 'var(--status-blue-bg)', border: '1px solid var(--status-blue-border)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: 'var(--status-blue)' }}>
+              Para activación TV: usa las instrucciones para guiar al cliente sobre cómo darte su código.
+            </div>
+          )}
           <div>
-            <label className="label">Notas adicionales</label>
+            <label className="label">{dt === 'activacion_tv' ? 'Instrucciones para el cliente' : 'Notas adicionales'}</label>
             <textarea className="input" rows={3} style={{ resize: 'none' }}
-              placeholder="Instrucciones adicionales para el cliente..."
+              placeholder={dt === 'activacion_tv' ? 'Ej: Enciende tu TV, ve a Configuración > Activar y envíame el código que aparece.' : 'Instrucciones adicionales...'}
               value={form.extra_notes} onChange={e => setForm(f => ({ ...f, extra_notes: e.target.value }))} />
           </div>
-
           {error && <Alert type="error">{error}</Alert>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>

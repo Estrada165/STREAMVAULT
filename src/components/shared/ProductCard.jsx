@@ -32,9 +32,17 @@ export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockC
   const platformName = product.platforms?.name || ''
   const accentColor = getPlatformColor(platformName)
 
-  const inStock = product.delivery_mode === 'stock' && stockCount > 0
+  const isStock = product.delivery_mode === 'stock'
   const isPedido = product.delivery_mode === 'pedido'
-  const outOfStock = product.delivery_mode === 'stock' && stockCount === 0
+
+  // For stock mode: use real stock count
+  // For pedido mode: use stock_qty field (null = unlimited, 0 = no disponible, N = hay N)
+  const inStock = isStock && stockCount > 0
+  const outOfStock = isStock && stockCount === 0
+  const pedidoUnavailable = isPedido && product.stock_qty === 0
+  const pedidoAvailable = isPedido && (product.stock_qty === null || product.stock_qty === undefined || product.stock_qty > 0)
+  const canBuy = inStock || pedidoAvailable
+  const isDisabled = outOfStock || pedidoUnavailable
 
   return (
     <>
@@ -97,13 +105,13 @@ export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockC
               {stockCount}
             </span>
           )}
-          {isPedido && (
+          {isPedido && pedidoAvailable && (
             <span className="badge badge-yellow" style={{ fontSize: 10 }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />
-              Pedido
+              {product.stock_qty > 0 ? `Pedido: ${product.stock_qty}` : 'A pedido'}
             </span>
           )}
-          {outOfStock && (
+          {(outOfStock || pedidoUnavailable) && (
             <span className="badge badge-neutral" style={{ fontSize: 10, opacity: 0.6 }}>Agotado</span>
           )}
         </div>
@@ -152,23 +160,23 @@ export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockC
         {/* BUY BUTTON */}
         <div style={{ padding: '0 14px 14px' }}>
           <button
-            onClick={() => !outOfStock && onBuy && onBuy(product)}
-            disabled={outOfStock}
+            onClick={() => canBuy && onBuy && onBuy(product)}
+            disabled={isDisabled}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
               gap: 6, padding: '9px 0', borderRadius: 10, fontSize: 13, fontWeight: 500,
-              cursor: outOfStock ? 'not-allowed' : 'pointer', border: 'none',
-              background: outOfStock ? 'var(--surface-overlay)' : accentColor,
-              color: outOfStock ? 'var(--ink-faint)' : '#fff',
-              opacity: outOfStock ? 0.7 : 1,
+              cursor: isDisabled ? 'not-allowed' : 'pointer', border: 'none',
+              background: isDisabled ? 'var(--surface-overlay)' : accentColor,
+              color: isDisabled ? 'var(--ink-faint)' : '#fff',
+              opacity: isDisabled ? 0.7 : 1,
               transition: 'opacity 0.15s, transform 0.12s',
               fontFamily: 'DM Sans, sans-serif',
             }}
-            onMouseEnter={e => { if (!outOfStock) e.currentTarget.style.opacity = '0.85' }}
-            onMouseLeave={e => { if (!outOfStock) e.currentTarget.style.opacity = '1' }}
+            onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.opacity = '0.85' }}
+            onMouseLeave={e => { if (!isDisabled) e.currentTarget.style.opacity = '1' }}
           >
             <IconShoppingCart size={14} />
-            {outOfStock ? 'Sin stock' : isPedido ? 'Pedir' : 'Agregar'}
+            {isDisabled ? 'Sin stock' : isPedido ? 'Pedir' : 'Agregar'}
           </button>
         </div>
       </div>

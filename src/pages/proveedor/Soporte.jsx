@@ -150,52 +150,82 @@ export default function ProveedorSoporte() {
     setRenewSaving(false)
   }
 
+  // ── FIXED: executeCancel ──────────────────────────────────────────────────
+  // type = 'platform' → reembolso en saldo de plataforma (amount_usd)
+  // type = 'external'  → reembolso externo — NO toca el saldo
+  // type = 'none'      → sin reembolso — NO toca el saldo
   async function executeCancel(type) {
-    setCancelSaving(true); setCancelError('')
+    setCancelSaving(true)
+    setCancelError('')
     try {
       const order = cancelModal.orders
       const refund = calcRefund(order.price_paid, order.created_at, order.expires_at)
 
-      // 1. Cancelar el pedido
-      await supabase.from('orders').update({ status: 'cancelado' }).eq('id', order.id)
+      // 1. Cancelar la orden
+      const { error: orderErr } = await supabase
+        .from('orders').update({ status: 'cancelado', updated_at: new Date().toISOString() }).eq('id', order.id)
+      if (orderErr) throw orderErr
 
-      // 2. Liberar el stock_item — usando is_sold y order_id (columnas reales de tu tabla)
+      // 2. Liberar el stock item de vuelta a disponible
       if (order.stock_item_id) {
         await supabase.from('stock_items')
-          .update({ is_sold: false, order_id: null })
+          .update({ is_sold: false, sold_at: null, order_id: null })
           .eq('id', order.stock_item_id)
       }
 
-      // 3. Reembolso en plataforma si aplica
+      // 3. Reembolso SOLO si type === 'platform' — los otros dos NO tocan el saldo
       if (type === 'platform' && refund.refundAmount > 0) {
-        const { data: balanceRow } = await supabase.from('balances').select('amount').eq('user_id', order.distributor_id).maybeSingle()
-        const current = balanceRow?.amount || 0
-        await supabase.from('balances').upsert(
-          { user_id: order.distributor_id, amount: Math.round((current + refund.refundAmount) * 100) / 100 },
-          { onConflict: 'user_id' }
-        )
+        // Leer saldo actual con columna correcta: amount_usd
+        const { data: balRow } = await supabase
+          .from('balances').select('amount_usd').eq('user_id', order.distributor_id).maybeSingle()
+        const currentBal = parseFloat(balRow?.amount_usd || 0)
+        const newBal = Math.round((currentBal + refund.refundAmount) * 100) / 100
+
+        const { error: balErr } = await supabase
+          .from('balances').update({ amount_usd: newBal }).eq('user_id', order.distributor_id)
+        if (balErr) throw balErr
+
         await supabase.from('transactions').insert({
-          user_id: order.distributor_id, type: 'reembolso', amount: refund.refundAmount,
-          description: `Reembolso proporcional — Pedido #${order.order_code} (${refund.remainingDays}d restantes de ${refund.totalDays}d)`,
-          ref_id: order.id,
+          user_id: order.distributor_id,
+          type: 'devolucion',
+          amount_usd: refund.refundAmount,
+          description: `Reembolso por anulación — Pedido #${order.order_code} (${refund.remainingDays}d restantes)`,
+          ref_order_id: order.id,
         })
       }
+      // type === 'external' y type === 'none' no tocan el saldo — intencional
 
-      // 4. Cerrar ticket con respuesta
+      // 4. Mensaje de notificación según tipo
       const msg = type === 'platform'
-        ? `Venta anulada. Se acreditaron $${refund.refundAmount} en tu saldo de plataforma.`
+        ? `Tu pedido #${order.order_code} fue cancelado. Se te reembolsaron $${refund.refundAmount} en tu saldo de la plataforma.`
         : type === 'external'
-        ? `Venta anulada. Recibirás un reembolso externo de $${refund.refundAmount}.`
-        : cancelNote || 'Venta anulada sin reembolso.'
+        ? `Tu pedido #${order.order_code} fue cancelado. El reembolso de $${refund.refundAmount} se realizará de forma externa.`
+        : cancelNote?.trim() || `Tu pedido #${order.order_code} fue cancelado sin reembolso.`
 
-      await supabase.from('support_tickets').update({ status: 'resuelto', provider_response: msg, updated_at: new Date().toISOString() }).eq('id', cancelModal.id)
-      await supabase.from('notifications').insert({ user_id: order.distributor_id, title: 'Venta anulada', message: msg, type: 'warning', ref_id: order.id })
+      // 5. Marcar ticket como resuelto
+      await supabase.from('support_tickets').update({
+        status: 'resuelto',
+        provider_response: msg,
+        updated_at: new Date().toISOString(),
+      }).eq('id', cancelModal.id)
+
+      // 6. Notificar al distribuidor
+      await supabase.from('notifications').insert({
+        user_id: order.distributor_id,
+        title: 'Venta anulada',
+        message: msg,
+        type: type === 'platform' ? 'success' : 'warning',
+        ref_id: order.id,
+      })
 
       setCancelDone(true)
       setTimeout(() => { setCancelModal(null); setCancelDone(false); fetchTickets() }, 2000)
-    } catch (e) { setCancelError(e.message) }
+    } catch (e) {
+      setCancelError(e.message)
+    }
     setCancelSaving(false)
   }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const statusColor = { abierto: 'red', en_revision: 'yellow', resuelto: 'green' }
   const statusLabel = { abierto: 'Abierto', en_revision: 'En revisión', resuelto: 'Resuelto' }
@@ -329,7 +359,7 @@ export default function ProveedorSoporte() {
         )}
       </Modal>
 
-      {/* ══ MODAL: EDITAR CREDENCIALES (encima del principal) ══ */}
+      {/* ══ MODAL: EDITAR CREDENCIALES ══ */}
       <Modal open={showEditCreds} onClose={() => setShowEditCreds(false)} title="Editar credenciales" maxWidth="max-w-md">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <p style={{ fontSize: 12, color: 'var(--status-yellow)', marginBottom: 4 }}>Los cambios se guardan inmediatamente al confirmar.</p>

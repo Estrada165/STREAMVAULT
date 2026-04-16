@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState } from '@/components/ui'
-import { IconPlus, IconPower, IconEdit, IconSearch, IconTrash } from '@/assets/icons'
+import { IconUsers, IconSearch, IconEdit, IconTrash } from '@/assets/icons'
 import { daysRemaining, getDaysColor, formatDate } from '@/utils'
 
 export default function AdminProveedores() {
@@ -13,25 +13,14 @@ export default function AdminProveedores() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const [deleteModal, setDeleteModal] = useState(null)
-  const [deleteConfirmText, setDeleteConfirmText] = useState('')
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState('')
-
   useEffect(() => { fetchProviders() }, [])
 
   async function fetchProviders() {
-    const { data: provs } = await supabase
-      .from('providers')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (!provs?.length) { setLoading(false); return }
+    const { data: provs } = await supabase.from('providers').select('*').order('created_at', { ascending: false })
+    if (!provs?.length) { setProviders([]); setLoading(false); return }
 
     const userIds = provs.map(p => p.user_id)
-    const { data: usersData } = await supabase
-      .from('users').select('id, email, full_name, is_active').in('id', userIds)
-
+    const { data: usersData } = await supabase.from('users').select('id, email, full_name, is_active').in('id', userIds)
     const usersMap = {}
     usersData?.forEach(u => { usersMap[u.id] = u })
     setProviders(provs.map(p => ({ ...p, users: usersMap[p.user_id] || {} })))
@@ -39,8 +28,15 @@ export default function AdminProveedores() {
   }
 
   async function toggleActive(provider) {
-    await supabase.from('providers').update({ is_active: !provider.is_active }).eq('id', provider.id)
-    await supabase.from('users').update({ is_active: !provider.is_active }).eq('id', provider.users?.id)
+    const newActive = !provider.is_active
+    await supabase.from('providers').update({ is_active: newActive }).eq('id', provider.id)
+    await supabase.from('users').update({ is_active: newActive }).eq('id', provider.user_id)
+
+    // If deactivating, also deactivate all distributors
+    if (!newActive) {
+      await supabase.from('users').update({ is_active: false })
+        .eq('provider_id', provider.id).eq('role', 'distribuidor')
+    }
     fetchProviders()
   }
 
@@ -51,64 +47,64 @@ export default function AdminProveedores() {
       const base = current > new Date() ? current : new Date()
       base.setDate(base.getDate() + parseInt(extendDays))
       await supabase.from('providers').update({ expires_at: base.toISOString(), is_active: true }).eq('id', modal.data.id)
-      await supabase.from('users').update({ is_active: true }).eq('id', modal.data.users?.id)
+      await supabase.from('users').update({ is_active: true }).eq('id', modal.data.user_id)
       setModal(null); fetchProviders()
     } catch (e) { setError(e.message) }
     setSaving(false)
   }
 
-  async function deleteProvider() {
-    if (deleteConfirmText !== 'eliminar') return
-    setDeleting(true); setDeleteError('')
-    try {
-      const p = deleteModal
+  async function deleteProvider(provider) {
+    setModal({ type: 'delete', data: provider })
+    setError('')
+  }
 
-      // 1. Obtener todos los productos del proveedor
+  async function confirmDeleteProvider() {
+    const provider = modal.data
+    setSaving(true); setError('')
+    try {
+      // 1. Get all product IDs for this provider
       const { data: products } = await supabase
-        .from('products').select('id').eq('provider_id', p.id)
-      const productIds = (products || []).map(x => x.id)
+        .from('products').select('id').eq('provider_id', provider.id)
+      const productIds = products?.map(p => p.id) || []
 
       if (productIds.length) {
-        // 2. Obtener todos los stock_items de esos productos
-        const { data: stocks } = await supabase
-          .from('stock_items').select('id').in('product_id', productIds)
-        const stockIds = (stocks || []).map(x => x.id)
+        // 2. Release stock items linked to orders (unlink order_id first)
+        await supabase.from('stock_items').update({ order_id: null })
+          .in('product_id', productIds)
 
-        if (stockIds.length) {
-          // 3. Borrar órdenes vinculadas al stock
-          await supabase.from('orders').delete().in('stock_item_id', stockIds)
-          // 4. Borrar stock_items
-          await supabase.from('stock_items').delete().in('product_id', productIds)
-        }
+        // 3. Cancel and delete all orders for these products
+        await supabase.from('orders').delete().in('product_id', productIds)
 
-        // 5. Borrar productos
-        await supabase.from('products').delete().in('id', productIds)
+        // 4. Delete stock items
+        await supabase.from('stock_items').delete().in('product_id', productIds)
+
+        // 5. Delete support tickets
+        await supabase.from('support_tickets').delete().eq('provider_id', provider.id)
+
+        // 6. Delete products
+        await supabase.from('products').delete().eq('provider_id', provider.id)
       }
 
-      // 6. Borrar support_tickets del proveedor
-      await supabase.from('support_tickets').delete().eq('provider_id', p.id)
+      // 7. Deactivate distributors (don't delete their accounts, just revoke access)
+      await supabase.from('users').update({ is_active: false, provider_id: null })
+        .eq('provider_id', provider.id)
 
-      // 7. Borrar notificaciones relacionadas (si la tabla las tiene por user_id)
-      if (p.user_id) {
-        await supabase.from('notifications').delete().eq('user_id', p.user_id)
-      }
+      // 8. Delete the provider row
+      await supabase.from('providers').delete().eq('id', provider.id)
 
-      // 8. Desactivar y borrar el registro de proveedor
-      await supabase.from('users').update({ is_active: false }).eq('id', p.user_id)
-      const { error: err } = await supabase.from('providers').delete().eq('id', p.id)
-      if (err) throw err
+      // 9. Deactivate provider's user account
+      await supabase.from('users').update({ is_active: false }).eq('id', provider.user_id)
 
-      setDeleteModal(null)
-      setDeleteConfirmText('')
+      setModal(null)
       fetchProviders()
-    } catch (e) { setDeleteError(e.message) }
-    setDeleting(false)
+    } catch (e) { setError(e.message) }
+    setSaving(false)
   }
 
   const filtered = providers.filter(p =>
     (p.display_name || p.users?.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
     (p.users?.email || '').toLowerCase().includes(search.toLowerCase()) ||
-    (p.slug || '').toLowerCase().includes(search.toLowerCase())
+    p.slug?.includes(search.toLowerCase())
   )
 
   return (
@@ -117,167 +113,143 @@ export default function AdminProveedores() {
         title="Proveedores"
         subtitle="Gestiona el acceso de proveedores a la plataforma"
         action={
-          <button className="btn-primary" onClick={() => setModal({ type: 'info' })}>
-            <IconPlus size={16} />Nuevo proveedor
+          <button className="btn-secondary" onClick={() => setModal({ type: 'info' })}>
+            <IconUsers size={15} />
+            ¿Cómo agregar?
           </button>
         }
       />
 
-      <div className="relative mb-5">
-        <IconSearch size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)]" />
-        <input className="input pl-9" placeholder="Buscar por nombre, email o código..."
+      <div style={{ position: 'relative', marginBottom: 16 }}>
+        <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)' }} />
+        <input className="input" style={{ paddingLeft: 36 }} placeholder="Buscar por nombre, email o código..."
           value={search} onChange={e => setSearch(e.target.value)} />
       </div>
 
-      {loading ? <div className="flex justify-center py-20"><Spinner size={32} /></div> : (
-        <div className="card overflow-hidden">
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Proveedor</th>
-                  <th>Código</th>
-                  <th>Estado</th>
-                  <th>Días restantes</th>
-                  <th>Vence</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(p => {
-                  const days = p.expires_at ? daysRemaining(p.expires_at) : null
-                  const dColor = days !== null ? getDaysColor(days) : 'neutral'
-                  return (
-                    <tr key={p.id}>
-                      <td>
-                        <div>
-                          <p className="font-medium text-[var(--ink)]">{p.display_name || p.users?.full_name || '—'}</p>
-                          <p className="text-xs text-[var(--ink-faint)]">{p.users?.email}</p>
-                        </div>
-                      </td>
-                      <td><span className="font-mono text-xs bg-[var(--surface-overlay)] px-2 py-0.5 rounded-md">{p.slug}</span></td>
-                      <td><Badge color={p.is_active ? 'green' : 'red'} dot>{p.is_active ? 'Activo' : 'Inactivo'}</Badge></td>
-                      <td>
-                        {days !== null ? (
-                          <span className={`text-xs font-mono font-semibold
-                            ${dColor === 'green' ? 'text-[var(--status-green)]' : ''}
-                            ${dColor === 'yellow' ? 'text-[var(--status-yellow)]' : ''}
-                            ${dColor === 'red' ? 'text-[var(--status-red)]' : ''}
-                          `}>
-                            {days <= 0 ? 'Vencido' : `${days}d`}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="text-xs text-[var(--ink-muted)]">{formatDate(p.expires_at)}</td>
-                      <td>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <button onClick={() => { setModal({ type: 'extend', data: p }); setExtendDays(30) }}
-                            className="btn-secondary text-xs py-1.5 px-2.5">
-                            <IconEdit size={13} />Extender
-                          </button>
-                          <button onClick={() => toggleActive(p)}
-                            className={`btn-ghost text-xs py-1.5 px-2.5 ${p.is_active ? 'text-[var(--status-red)]' : 'text-[var(--status-green)]'}`}>
-                            <IconPower size={13} />
-                            {p.is_active ? 'Desactivar' : 'Activar'}
-                          </button>
-                          <button onClick={() => { setDeleteModal(p); setDeleteConfirmText(''); setDeleteError('') }}
-                            className="btn-ghost text-xs py-1.5 px-2.5 text-[var(--status-red)]">
-                            <IconTrash size={13} />Eliminar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="text-center text-[var(--ink-faint)] py-10">Sin proveedores</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={28} /></div>
+      ) : filtered.length === 0 ? (
+        <div className="card"><EmptyState icon={IconUsers} title="Sin proveedores" description="Los proveedores aparecen aquí cuando se registran en la app." /></div>
+      ) : (
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th>Código</th>
+                <th>Estado</th>
+                <th>Días restantes</th>
+                <th>Vence</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => {
+                const days = p.expires_at ? daysRemaining(p.expires_at) : null
+                const dColor = days !== null ? getDaysColor(days) : null
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13 }}>{p.display_name || p.users?.full_name || '—'}</p>
+                      <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{p.users?.email}</p>
+                    </td>
+                    <td>
+                      <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 12, background: 'var(--surface-overlay)', padding: '2px 8px', borderRadius: 6 }}>{p.slug}</span>
+                    </td>
+                    <td>
+                      <Badge color={p.is_active ? 'green' : 'red'} dot>{p.is_active ? 'Activo' : 'Inactivo'}</Badge>
+                    </td>
+                    <td>
+                      {days !== null ? (
+                        <span className={`days-pill ${dColor}`}>{days <= 0 ? 'Vencido' : `${days}d`}</span>
+                      ) : <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>—</span>}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{formatDate(p.expires_at)}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button onClick={() => { setModal({ type: 'extend', data: p }); setExtendDays(30); setError('') }}
+                          className="btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>
+                          <IconEdit size={13} />Extender
+                        </button>
+                        <button onClick={() => toggleActive(p)}
+                          className="btn-ghost" style={{ fontSize: 12, color: p.is_active ? 'var(--status-red)' : 'var(--status-green)' }}>
+                          {p.is_active ? 'Desactivar' : 'Activar'}
+                        </button>
+                        <button onClick={() => deleteProvider(p)} className="btn-ghost" style={{ padding: '6px 8px', color: 'var(--status-red)' }}>
+                          <IconTrash size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Modal: Extender acceso */}
+      {/* Extend modal */}
       <Modal open={modal?.type === 'extend'} onClose={() => setModal(null)} title="Extender acceso">
-        <div className="space-y-4">
-          <div className="bg-[var(--surface-overlay)] rounded-xl p-3 text-sm text-[var(--ink-muted)]">
-            <strong className="text-[var(--ink)]">{modal?.data?.display_name || modal?.data?.users?.full_name}</strong>
-            <br /><span className="text-xs font-mono">{modal?.data?.slug}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: 12, fontSize: 13, color: 'var(--ink-muted)' }}>
+            <strong style={{ color: 'var(--ink)' }}>{modal?.data?.display_name || modal?.data?.users?.full_name || modal?.data?.users?.email}</strong>
+            <br /><span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11 }}>{modal?.data?.slug}</span>
           </div>
           <div>
             <label className="label">Días a agregar</label>
             <select className="input" value={extendDays} onChange={e => setExtendDays(e.target.value)}>
-              {[7, 15, 30, 60, 90, 180, 365].map(d => (
-                <option key={d} value={d}>{d} días</option>
-              ))}
+              {[7, 15, 30, 60, 90, 180, 365].map(d => <option key={d} value={d}>{d} días</option>)}
             </select>
           </div>
           {error && <Alert type="error">{error}</Alert>}
-          <div className="flex gap-2 pt-1">
-            <button onClick={() => setModal(null)} className="btn-secondary flex-1 justify-center">Cancelar</button>
-            <button onClick={extendAccess} disabled={saving} className="btn-primary flex-1 justify-center">
-              {saving ? <Spinner size={16} /> : 'Confirmar'}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
+            <button onClick={extendAccess} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+              {saving ? <Spinner size={15} /> : 'Confirmar'}
             </button>
           </div>
         </div>
       </Modal>
 
-      {/* Modal: Info nuevo proveedor */}
+      {/* Info modal */}
       <Modal open={modal?.type === 'info'} onClose={() => setModal(null)} title="Agregar proveedor">
         <Alert type="info">
-          El proveedor debe registrarse en <strong>/register</strong> con rol "Proveedor". Una vez registrado, aparecerá aquí y podrás activarlo y extender su acceso.
+          El proveedor debe registrarse en <strong>/register</strong> con rol "Proveedor". Luego aparece aquí para que actives su acceso y le des días.
         </Alert>
-        <button onClick={() => setModal(null)} className="btn-primary w-full justify-center mt-4">Entendido</button>
+        <button onClick={() => setModal(null)} className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 14 }}>Entendido</button>
       </Modal>
 
-      {/* Modal: Confirmar eliminación */}
-      <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title="Eliminar proveedor" maxWidth="max-w-sm">
-        {deleteModal && (
+      {/* Delete confirmation modal */}
+      <Modal open={modal?.type === 'delete'} onClose={() => setModal(null)} title="Eliminar proveedor">
+        {modal?.data && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ background: 'var(--status-red-bg)', border: '1px solid var(--status-red)', borderRadius: 10, padding: '12px 14px', fontSize: 12 }}>
-              <p style={{ fontWeight: 700, color: 'var(--status-red)', marginBottom: 6 }}>⚠ Esta acción es irreversible</p>
-              <p style={{ color: 'var(--ink-muted)', lineHeight: 1.6 }}>
-                Al eliminar a <strong>{deleteModal.display_name || deleteModal.users?.full_name}</strong> se borrará permanentemente:
-              </p>
-              <ul style={{ marginTop: 8, paddingLeft: 16, color: 'var(--ink-muted)', lineHeight: 1.9, fontSize: 12 }}>
+            <div style={{ background: 'var(--status-red-bg)', border: '1px solid var(--status-red-border)', borderRadius: 10, padding: '12px 14px', fontSize: 13 }}>
+              <p style={{ fontWeight: 700, color: 'var(--status-red)', marginBottom: 8 }}>⚠ Esta acción es irreversible</p>
+              <p style={{ color: 'var(--status-red)', marginBottom: 8 }}>Al eliminar a <strong>{modal.data.display_name || modal.data.users?.email}</strong> se borrará permanentemente:</p>
+              <ul style={{ color: 'var(--status-red)', fontSize: 12, paddingLeft: 16, lineHeight: 2 }}>
                 <li>Su cuenta y acceso a la plataforma</li>
                 <li>Todos sus productos y stock</li>
                 <li>Todos los pedidos vinculados a sus productos</li>
                 <li>Todos sus tickets de soporte</li>
                 <li>Sus distribuidores no serán eliminados, pero perderán acceso a sus productos</li>
               </ul>
-              <p style={{ marginTop: 8, color: 'var(--status-red)', fontWeight: 600 }}>
-                No hay forma de recuperar esta información.
-              </p>
+              <p style={{ color: 'var(--status-red)', fontWeight: 600, marginTop: 8 }}>No hay forma de recuperar esta información.</p>
             </div>
-
             <div>
-              <label className="label">
-                Escribe <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--status-red)' }}>eliminar</span> para confirmar
-              </label>
-              <input
-                className="input"
-                placeholder="eliminar"
-                value={deleteConfirmText}
-                onChange={e => setDeleteConfirmText(e.target.value.toLowerCase())}
-                style={{ borderColor: deleteConfirmText === 'eliminar' ? 'var(--status-red)' : undefined }}
-              />
+              <label className="label">Escribe <span style={{ color: 'var(--status-red)', fontWeight: 700 }}>ELIMINAR</span> para confirmar</label>
+              <input className="input" placeholder="ELIMINAR"
+                id="delete-confirm-input"
+                onChange={e => {
+                  const btn = document.getElementById('delete-confirm-btn')
+                  if (btn) btn.disabled = e.target.value !== 'ELIMINAR'
+                }} />
             </div>
-
-            {deleteError && <Alert type="error">{deleteError}</Alert>}
-
+            {error && <Alert type="error">{error}</Alert>}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setDeleteModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>
-                Cancelar
-              </button>
-              <button
-                onClick={deleteProvider}
-                disabled={deleting || deleteConfirmText !== 'eliminar'}
-                className="btn-danger"
-                style={{ flex: 1, justifyContent: 'center', opacity: deleteConfirmText !== 'eliminar' ? 0.4 : 1 }}
-              >
-                {deleting ? <Spinner size={15} /> : 'Eliminar todo'}
+              <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
+              <button id="delete-confirm-btn" onClick={confirmDeleteProvider} disabled={true}
+                className="btn-danger" style={{ flex: 1, justifyContent: 'center' }}>
+                {saving ? <Spinner size={15} /> : 'Eliminar todo'}
               </button>
             </div>
           </div>

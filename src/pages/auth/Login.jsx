@@ -107,6 +107,8 @@ export default function Login() {
             Regístrate
           </Link>
         </p>
+
+  
       </div>
     </div>
   )
