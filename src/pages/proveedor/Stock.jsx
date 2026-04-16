@@ -28,7 +28,8 @@ export default function ProveedorStock() {
       .eq('is_active', true)
       .order('name')
     setProducts(data || [])
-    if (data?.length) setSelectedProduct(data[0])
+    // Only set selectedProduct on first load, not on every refresh
+    if (data?.length && !selectedProduct) setSelectedProduct(data[0])
     setLoading(false)
   }
 

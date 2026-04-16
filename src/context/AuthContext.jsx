@@ -1,75 +1,72 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-console.log('SUPABASE URL:', import.meta.env.VITE_SUPABASE_URL)
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
-  const [user, setUser] = useState(null)       // auth.users row
-  const [profile, setProfile] = useState(null) // public.users row
+  const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [provider, setProvider] = useState(null)
   const [loading, setLoading] = useState(true)
+  const fetchingRef = useRef(false)
 
   useEffect(() => {
+    // Get initial session once
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session?.user) fetchProfile(session.user.id)
-      else setLoading(false)
+      if (session?.user) {
+        fetchProfile(session.user.id)
+      } else {
+        setLoading(false)
+      }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session?.user) fetchProfile(session.user.id)
-      else {
+    // Only handle sign out events to reset state
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setSession(null)
         setProfile(null)
         setProvider(null)
         setLoading(false)
+        fetchingRef.current = false
       }
+      // SIGNED_IN is handled by getSession above to avoid double fetch
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-async function fetchProfile(userId) {
-  try {
-    const { data: profileData, error: profileError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle()
+  async function fetchProfile(userId) {
+    if (fetchingRef.current) return
+    fetchingRef.current = true
+    try {
+      const { data: profileData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle()
 
-    if (profileError) {
-      console.error('Profile error:', profileError)
+      if (error) { console.error('fetchProfile error:', error); return }
+      if (!profileData) { console.warn('No profile found for', userId); return }
+
+      setProfile(profileData)
+
+      if (profileData.role === 'proveedor') {
+        const { data: prov } = await supabase
+          .from('providers').select('*').eq('user_id', userId).maybeSingle()
+        setProvider(prov)
+      } else if (profileData.role === 'distribuidor' && profileData.provider_id) {
+        const { data: prov } = await supabase
+          .from('providers').select('*').eq('id', profileData.provider_id).maybeSingle()
+        setProvider(prov)
+      }
+    } catch (err) {
+      console.error('Error fetching profile:', err)
+    } finally {
       setLoading(false)
-      return
     }
-
-    if (!profileData) {
-      console.warn('Sin perfil para:', userId)
-      setLoading(false)
-      return
-    }
-
-    setProfile(profileData)
-
-    if (profileData.role === 'proveedor') {
-      const { data: prov } = await supabase
-        .from('providers').select('*')
-        .eq('user_id', userId).maybeSingle()
-      setProvider(prov)
-    } else if (profileData.role === 'distribuidor' && profileData.provider_id) {
-      const { data: prov } = await supabase
-        .from('providers').select('*')
-        .eq('id', profileData.provider_id).maybeSingle()
-      setProvider(prov)
-    }
-  } catch (err) {
-    console.error('Error fetchProfile:', err)
-  } finally {
-    setLoading(false)
   }
-}
 
   async function signIn(email, password) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
@@ -77,7 +74,7 @@ async function fetchProfile(userId) {
     return data
   }
 
-async function signUp(email, password, role, providerCode = null, fullName = '') {
+  async function signUp(email, password, role, providerCode = null, phone = null) {
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) throw error
 
@@ -96,33 +93,19 @@ async function signUp(email, password, role, providerCode = null, fullName = '')
     }
 
     // Insert profile
-   // Insert profile
-const { error: profileError } = await supabase
-  .from('users')
-  .insert({
-    id: data.user.id,
-    email,
-    full_name: fullName,
-    role,
-    provider_id,
-    is_active: false,
-  })
+    const { error: profileError } = await supabase
+      .from('users')
+      .insert({
+        id: data.user.id,
+        email,
+        role,
+        provider_id,
+        phone: phone || null,
+        is_active: false,
+      })
 
-if (profileError) throw profileError
-
-// Si es proveedor, crear automáticamente su fila en providers
-if (role === 'proveedor') {
-  const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
-  const { error: provError } = await supabase
-    .from('providers')
-    .insert({
-      user_id: data.user.id,
-      slug: slug + '-' + Math.random().toString(36).slice(2, 6),
-      display_name: fullName,
-      is_active: false,
-    })
-  if (provError) console.error('Error creando provider:', provError)
-}
+    if (profileError) throw profileError
+    return data
   }
 
   async function signOut() {

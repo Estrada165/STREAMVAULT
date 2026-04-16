@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
 import { Alert, Spinner } from '@/components/ui'
@@ -8,10 +8,10 @@ import { LogoSV, IconSun, IconMoon, IconEyeOff, IconEye, IconInfo } from '@/asse
 export default function Register() {
   const { signUp } = useAuth()
   const { toggle, isDark } = useTheme()
-  const navigate = useNavigate()
   const [role, setRole] = useState('distribuidor')
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [providerCode, setProviderCode] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -25,7 +25,7 @@ export default function Register() {
     setLoading(true)
     setError('')
     try {
-      await signUp(email, password, role, providerCode)
+      await signUp(email, password, role, providerCode, phone.trim() || null)
       setSuccess(true)
     } catch (err) {
       setError(err.message || 'Error al registrarse')
@@ -103,6 +103,13 @@ export default function Register() {
               <label className="label">Correo electrónico</label>
               <input type="email" className="input" placeholder="tu@correo.com" value={email}
                 onChange={e => setEmail(e.target.value)} required autoComplete="email" />
+            </div>
+
+            <div>
+              <label className="label">WhatsApp / Teléfono <span style={{ fontWeight: 400, color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>(opcional)</span></label>
+              <input type="tel" className="input" placeholder="+51 999 999 999" value={phone}
+                onChange={e => setPhone(e.target.value)} />
+              <p className="text-xs text-[var(--ink-faint)] mt-1">Para que el administrador pueda contactarte</p>
             </div>
 
             <div>
