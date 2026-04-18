@@ -86,6 +86,7 @@ export default function AdminProveedores() {
       await supabase.from('providers').delete().eq('id', provider.id)
       // Deactivate user
       await supabase.from('users').update({ is_active: false }).eq('id', provider.user_id)
+      
 
       setModal(null)
       fetchProviders()

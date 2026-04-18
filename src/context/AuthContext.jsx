@@ -12,7 +12,6 @@ export function AuthProvider({ children }) {
   const fetchingRef = useRef(false)
 
   useEffect(() => {
-    // Get initial session once
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session?.user) {
@@ -22,17 +21,21 @@ export function AuthProvider({ children }) {
       }
     })
 
-    // Only handle sign out events to reset state
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setSession(null)
-        setProfile(null)
-        setProvider(null)
-        setLoading(false)
-        fetchingRef.current = false
-      }
-      // SIGNED_IN is handled by getSession above to avoid double fetch
-    })
+  if (event === 'SIGNED_OUT') {
+    setSession(null)
+    setProfile(null)
+    setProvider(null)
+    setLoading(false)
+    fetchingRef.current = false
+  }
+  // ← AGREGAR ESTO:
+  if (event === 'SIGNED_IN' && session?.user) {
+    setSession(session)
+    fetchingRef.current = false  // resetear antes de fetchProfile
+    fetchProfile(session.user.id)
+  }
+})
 
     return () => subscription.unsubscribe()
   }, [])
@@ -74,10 +77,7 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  async function signUp(email, password, role, providerCode = null, phone = null) {
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    if (error) throw error
-
+  async function signUp(email, password, role, providerCode = null, phone = null, fullName = null) {
     let provider_id = null
 
     if (role === 'distribuidor' && providerCode) {
@@ -86,25 +86,44 @@ export function AuthProvider({ children }) {
         .select('id, is_active')
         .eq('slug', providerCode.toLowerCase())
         .single()
-
       if (!prov) throw new Error('Código de proveedor inválido')
       if (!prov.is_active) throw new Error('Este proveedor no está activo actualmente')
       provider_id = prov.id
     }
 
-    // Insert profile
+    // Pasar todos los datos en metadata para que el trigger los use como respaldo
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          role,
+          provider_id: provider_id || null,
+          phone: phone || null,
+          full_name: fullName || null,
+        }
+      }
+    })
+    if (error) throw error
+
+    // INSERT directo — el trigger ya pudo haberlo creado, ON CONFLICT lo ignora
     const { error: profileError } = await supabase
       .from('users')
       .insert({
         id: data.user.id,
         email,
+        full_name: fullName || null,   // ← estaba faltando esto
         role,
-        provider_id,
+        provider_id: provider_id || null,
         phone: phone || null,
         is_active: false,
       })
 
-    if (profileError) throw profileError
+    // Ignorar error si el trigger ya insertó el registro
+    if (profileError && !profileError.message.includes('duplicate')) {
+      throw profileError
+    }
+
     return data
   }
 
@@ -115,7 +134,10 @@ export function AuthProvider({ children }) {
   }
 
   async function refreshProfile() {
-    if (session?.user) await fetchProfile(session.user.id)
+    if (session?.user) {
+      fetchingRef.current = false
+      await fetchProfile(session.user.id)
+    }
   }
 
   const isAdmin = profile?.role === 'admin'

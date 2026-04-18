@@ -25,7 +25,7 @@ export default function Register() {
     setLoading(true)
     setError('')
     try {
-      await signUp(email, password, role, providerCode, phone.trim() || null)
+      await signUp(email, password, role, providerCode, phone.trim() || null, fullName.trim() || null)
       setSuccess(true)
     } catch (err) {
       setError(err.message || 'Error al registrarse')
