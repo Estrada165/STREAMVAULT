@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useSettings } from '@/hooks/useSettings'
-import { PageHeader, Modal, Alert, Spinner, EmptyState, Badge, Toggle } from '@/components/ui'
+import { PageHeader, Modal, Alert, Spinner, EmptyState, Toggle } from '@/components/ui'
 import { IconPlus, IconEdit, IconTrash, IconBox } from '@/assets/icons'
 import { formatUSD, getLogoPath, getDeliveryTypeLabel } from '@/utils'
 
@@ -14,6 +14,109 @@ const DELIVERY_TYPES = [
   { value: 'codigo', label: 'Código' },
 ]
 
+function getPlatformColor(name = '') {
+  const n = name.toLowerCase()
+  if (n.includes('netflix')) return '#e50914'
+  if (n.includes('disney')) return '#006e99'
+  if (n.includes('hbo') || n.includes('max')) return '#5822b4'
+  if (n.includes('amazon') || n.includes('prime')) return '#ff9900'
+  if (n.includes('spotify')) return '#1db954'
+  if (n.includes('youtube')) return '#ff0000'
+  if (n.includes('crunchyroll')) return '#f47521'
+  if (n.includes('apple')) return '#555555'
+  if (n.includes('paramount')) return '#0064ff'
+  if (n.includes('movistar')) return '#019df4'
+  if (n.includes('claro')) return '#da291c'
+  if (n.includes('directv')) return '#00a8e0'
+  if (n.includes('deezer')) return '#a238ff'
+  return '#6b7280'
+}
+
+// ─── CARD HEADER REDISEÑADO (mismo sistema que ProductCard) ───────────────────
+// Con imagen → aspect-ratio 16:9, objectFit: contain, imagen completa visible
+// Sin imagen → mismo ratio, fondo degradado, logo centrado
+function ProductCardHeader({ imageUrl, logoFilename, platformName, accentColor }) {
+  const [imgErr, setImgErr] = useState(false)
+  const [logoErr, setLogoErr] = useState(false)
+  const logoPath = getLogoPath(logoFilename)
+  const showImage = imageUrl && !imgErr
+
+  return (
+    <div style={{
+      width: '100%',
+      aspectRatio: '16 / 9',
+      position: 'relative',
+      overflow: 'hidden',
+      flexShrink: 0,
+      background: showImage
+        ? `${accentColor}18`
+        : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)`,
+    }}>
+      {showImage ? (
+        <>
+          <img
+            src={imageUrl}
+            alt={platformName}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            onError={() => setImgErr(true)}
+          />
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%',
+            background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)',
+            pointerEvents: 'none',
+          }} />
+          {/* Chip plataforma arriba izquierda */}
+          <div style={{
+            position: 'absolute', top: 8, left: 8,
+            display: 'flex', alignItems: 'center', gap: 5,
+            background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)',
+            borderRadius: 20, padding: '3px 8px 3px 4px',
+          }}>
+            <div style={{ width: 18, height: 18, borderRadius: '50%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${accentColor}40` }}>
+              {logoPath && !logoErr
+                ? <img src={logoPath} alt={platformName} style={{ width: 14, height: 14, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
+                : <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{(platformName || '?')[0]}</span>
+              }
+            </div>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)' }}>
+              {platformName}
+            </span>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{
+              position: 'absolute',
+              width: '55%', height: '55%', borderRadius: '50%',
+              background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)`,
+            }} />
+            <div style={{
+              width: 46, height: 46, borderRadius: 14,
+              background: `${accentColor}20`, border: `1.5px solid ${accentColor}35`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden', position: 'relative',
+            }}>
+              {logoPath && !logoErr
+                ? <img src={logoPath} alt={platformName} style={{ width: 34, height: 34, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
+                : <span style={{ fontSize: 19, fontWeight: 800, color: accentColor }}>{(platformName || '?')[0]}</span>
+              }
+            </div>
+          </div>
+          <p style={{
+            position: 'absolute', bottom: 8, left: 10,
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.07em',
+            textTransform: 'uppercase', color: `${accentColor}cc`,
+          }}>
+            {platformName}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function ProveedorProductos() {
   const { provider } = useAuth()
   const { settings } = useSettings()
@@ -27,7 +130,7 @@ export default function ProveedorProductos() {
   const [form, setForm] = useState({
     platform_id: '', name: '', delivery_type: 'perfil',
     delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
-    terms: '', warranty: '', what_includes: ''
+    terms: '', warranty: '', what_includes: '', image_url: ''
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -35,15 +138,11 @@ export default function ProveedorProductos() {
   useEffect(() => { if (provider) { fetchProducts(); fetchPlatforms() } }, [provider])
 
   async function fetchProducts() {
-    const { data } = await supabase
-      .from('products').select('*, platforms(*)')
-      .eq('provider_id', provider.id).order('created_at', { ascending: false })
+    const { data } = await supabase.from('products').select('*, platforms(*)').eq('provider_id', provider.id).order('created_at', { ascending: false })
     setProducts(data || [])
-
     if (data?.length) {
       const ids = data.map(p => p.id)
-      const { data: stock } = await supabase
-        .from('stock_items').select('product_id').in('product_id', ids).eq('is_sold', false)
+      const { data: stock } = await supabase.from('stock_items').select('product_id').in('product_id', ids).eq('is_sold', false)
       const counts = {}
       stock?.forEach(s => { counts[s.product_id] = (counts[s.product_id] || 0) + 1 })
       setStockCounts(counts)
@@ -60,9 +159,8 @@ export default function ProveedorProductos() {
   const usdFromForm = penToUsd(parseFloat(form.price_pen) || 0)
 
   function openCreate() {
-    setForm({ platform_id: platforms[0]?.id || '', name: '', delivery_type: 'perfil', delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '', terms: '', warranty: '', what_includes: '' })
-    setError('')
-    setModal({ type: 'form' })
+    setForm({ platform_id: platforms[0]?.id || '', name: '', delivery_type: 'perfil', delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '', terms: '', warranty: '', what_includes: '', image_url: '' })
+    setError(''); setModal({ type: 'form' })
   }
 
   function openEdit(p) {
@@ -71,9 +169,9 @@ export default function ProveedorProductos() {
       delivery_mode: p.delivery_mode, price_pen: (p.price_usd * rate).toFixed(2),
       duration_days: p.duration_days, stock_qty: p.stock_qty ?? '',
       terms: p.terms || '', warranty: p.warranty || '', what_includes: p.what_includes || '',
+      image_url: p.image_url || '',
     })
-    setError('')
-    setModal({ type: 'form', data: p })
+    setError(''); setModal({ type: 'form', data: p })
   }
 
   async function save() {
@@ -82,7 +180,6 @@ export default function ProveedorProductos() {
     if (!penVal || penVal <= 0) return setError('Ingresa un precio en soles válido')
     const priceUsd = parseFloat(penToUsd(penVal))
     if (!priceUsd) return setError('Error al convertir el precio')
-
     setSaving(true); setError('')
     try {
       const payload = {
@@ -92,6 +189,7 @@ export default function ProveedorProductos() {
         stock_qty: form.delivery_mode === 'pedido' && form.stock_qty !== '' ? parseInt(form.stock_qty) : null,
         terms: form.terms || null, warranty: form.warranty || null,
         what_includes: form.what_includes || null, provider_id: provider.id,
+        image_url: form.image_url || null,
       }
       if (modal?.data) {
         const { error: err } = await supabase.from('products').update(payload).eq('id', modal.data.id)
@@ -100,8 +198,7 @@ export default function ProveedorProductos() {
         const { error: err } = await supabase.from('products').insert(payload)
         if (err) throw err
       }
-      setModal(null)
-      fetchProducts()
+      setModal(null); fetchProducts()
     } catch (e) { setError(e.message) }
     setSaving(false)
   }
@@ -123,8 +220,7 @@ export default function ProveedorProductos() {
   return (
     <div>
       <PageHeader
-        title="Productos"
-        subtitle="Gestiona tu catálogo de streaming"
+        title="Productos" subtitle="Gestiona tu catálogo de streaming"
         action={<button className="btn-primary" onClick={openCreate}><IconPlus size={15} />Nuevo producto</button>}
       />
 
@@ -134,44 +230,91 @@ export default function ProveedorProductos() {
             action={<button className="btn-primary" onClick={openCreate}><IconPlus size={15} />Crear</button>} />
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 }} className="stagger">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }} className="stagger">
           {products.map(p => {
             const stock = stockCounts[p.id] || 0
+            const accentColor = getPlatformColor(p.platforms?.name || '')
             return (
-              <div key={p.id} className="card" style={{ padding: 16, opacity: p.is_active ? 1 : 0.5, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                    <img src={getLogoPath(p.platforms?.logo_filename)} alt={p.platforms?.name}
-                      style={{ width: 32, height: 32, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
+              <div
+                key={p.id}
+                style={{
+                  borderRadius: 14,
+                  border: '1px solid var(--surface-border)',
+                  overflow: 'hidden',
+                  opacity: p.is_active ? 1 : 0.5,
+                  display: 'flex', flexDirection: 'column',
+                  background: 'var(--surface-raised)',
+                  // Acento lateral izquierdo en lugar de top border — consistente con ProductCard
+                  boxShadow: `inset 3px 0 0 ${accentColor}`,
+                  transition: 'box-shadow 0.2s, transform 0.18s',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}, var(--shadow-elevated)`
+                  e.currentTarget.style.transform = 'translateY(-2px)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}`
+                  e.currentTarget.style.transform = ''
+                }}
+              >
+                {/* Header imagen */}
+                <ProductCardHeader
+                  imageUrl={p.image_url || null}
+                  logoFilename={p.platforms?.logo_filename}
+                  platformName={p.platforms?.name || ''}
+                  accentColor={accentColor}
+                />
+
+                {/* Body */}
+                <div style={{ padding: '10px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {/* Nombre */}
+                  <p style={{
+                    fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13,
+                    color: 'var(--ink)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {p.name}
+                  </p>
+
+                  {/* Tags */}
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    <span className="badge badge-neutral" style={{ fontSize: 10 }}>{getDeliveryTypeLabel(p.delivery_type)}</span>
+                    <span className={`badge ${p.delivery_mode === 'stock' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: 10 }}>
+                      {p.delivery_mode === 'stock' ? `Stock: ${stock}` : 'A pedido'}
+                    </span>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>{p.platforms?.name}</p>
-                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+
+                  {/* Precio */}
+                  <div>
+                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--ink)' }}>
+                      {formatUSD(p.price_usd)}
+                    </p>
+                    <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>
+                      ≈ S/ {(p.price_usd * rate).toFixed(2)} · {p.duration_days}d
+                    </p>
                   </div>
-                </div>
 
-                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                  <span className="badge badge-neutral" style={{ fontSize: 10 }}>{getDeliveryTypeLabel(p.delivery_type)}</span>
-                  <span className={`badge ${p.delivery_mode === 'stock' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: 10 }}>
-                    {p.delivery_mode === 'stock' ? `Stock: ${stock}` : 'A pedido'}
-                  </span>
-                </div>
+                  {/* Divisor */}
+                  <div style={{ height: 1, background: 'var(--surface-border)', margin: '0 -14px' }} />
 
-                <div>
-                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 17, color: 'var(--ink)' }}>{formatUSD(p.price_usd)}</p>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>≈ S/ {(p.price_usd * rate).toFixed(2)} · {p.duration_days}d</p>
-                </div>
-
-                <div style={{ height: 1, background: 'var(--surface-border)' }} />
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button onClick={() => openEdit(p)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center', fontSize: 12, padding: '7px 10px' }}>
-                    <IconEdit size={13} />Editar
-                  </button>
-                  <Toggle checked={p.is_active} onChange={() => toggleProduct(p)} />
-                  <button onClick={() => deleteProduct(p.id)} className="btn-ghost" style={{ padding: '7px 9px', color: 'var(--status-red)' }}>
-                    <IconTrash size={13} />
-                  </button>
+                  {/* Acciones */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      onClick={() => openEdit(p)}
+                      className="btn-secondary"
+                      style={{ flex: 1, justifyContent: 'center', fontSize: 12, padding: '7px 10px' }}
+                    >
+                      <IconEdit size={13} />Editar
+                    </button>
+                    <Toggle checked={p.is_active} onChange={() => toggleProduct(p)} />
+                    <button
+                      onClick={() => deleteProduct(p.id)}
+                      className="btn-ghost"
+                      style={{ padding: '7px 9px', color: 'var(--status-red)' }}
+                    >
+                      <IconTrash size={13} />
+                    </button>
+                  </div>
                 </div>
               </div>
             )
@@ -179,9 +322,8 @@ export default function ProveedorProductos() {
         </div>
       )}
 
-      {/* Create/Edit Modal */}
-      <Modal open={modal?.type === 'form'} onClose={() => setModal(null)}
-        title={modal?.data ? 'Editar producto' : 'Nuevo producto'} maxWidth="max-w-lg">
+      {/* ── Modal crear/editar (sin cambios funcionales) ── */}
+      <Modal open={modal?.type === 'form'} onClose={() => setModal(null)} title={modal?.data ? 'Editar producto' : 'Nuevo producto'} maxWidth="max-w-lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '72vh', overflowY: 'auto', paddingRight: 2 }}>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -202,40 +344,37 @@ export default function ProveedorProductos() {
 
           <div>
             <label className="label">Nombre del producto *</label>
-            <input className="input" placeholder="Ej: Netflix Perfil HD 30 días" value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            <input className="input" placeholder="Ej: Netflix Perfil HD 30 días" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
 
-          {/* PEN price with USD conversion */}
+          <div>
+            <label className="label">Imagen <span style={{ fontWeight: 400, color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>URL opcional — si no pones, se usa el logo de la plataforma</span></label>
+            <input className="input" placeholder="https://i.postimg.cc/tu-imagen.png" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} />
+            {form.image_url && (
+              <div style={{ marginTop: 8, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--surface-border)', aspectRatio: '16/9', background: 'var(--surface-overlay)' }}>
+                <img src={form.image_url} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={e => { e.target.parentElement.style.display = 'none' }} />
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div>
               <label className="label">Precio en S/ Soles *</label>
-              <input type="number" step="0.10" min="0" className="input" placeholder="0.00"
-                value={form.price_pen} onChange={e => setForm(f => ({ ...f, price_pen: e.target.value }))} />
-              {form.price_pen > 0 && (
-                <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 4 }}>
-                  = {formatUSD(usdFromForm)} (TC: S/{rate})
-                </p>
-              )}
+              <input type="number" step="0.10" min="0" className="input" placeholder="0.00" value={form.price_pen} onChange={e => setForm(f => ({ ...f, price_pen: e.target.value }))} />
+              {form.price_pen > 0 && <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 4 }}>= {formatUSD(usdFromForm)} (TC: S/{rate})</p>}
             </div>
             <div>
               <label className="label">Duración (días)</label>
-              <input type="number" min="1" className="input" value={form.duration_days}
-                onChange={e => setForm(f => ({ ...f, duration_days: parseInt(e.target.value) }))} />
+              <input type="number" min="1" className="input" value={form.duration_days} onChange={e => setForm(f => ({ ...f, duration_days: parseInt(e.target.value) }))} />
             </div>
           </div>
 
-          {/* Delivery mode */}
           <div>
             <label className="label">Modo de entrega</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[{ value: 'stock', label: 'En Stock', sub: 'Entrega automática' }, { value: 'pedido', label: 'A Pedido', sub: 'Entrega manual' }].map(m => (
                 <button key={m.value} type="button" onClick={() => setForm(f => ({ ...f, delivery_mode: m.value }))}
-                  style={{
-                    padding: '10px 14px', borderRadius: 10, textAlign: 'left', cursor: 'pointer',
-                    border: form.delivery_mode === m.value ? '2px solid var(--ink)' : '1px solid var(--surface-border)',
-                    background: form.delivery_mode === m.value ? 'var(--surface-overlay)' : 'var(--surface-raised)',
-                  }}>
+                  style={{ padding: '10px 14px', borderRadius: 10, textAlign: 'left', cursor: 'pointer', border: form.delivery_mode === m.value ? '2px solid var(--ink)' : '1px solid var(--surface-border)', background: form.delivery_mode === m.value ? 'var(--surface-overlay)' : 'var(--surface-raised)' }}>
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{m.label}</p>
                   <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{m.sub}</p>
                 </button>
@@ -243,36 +382,25 @@ export default function ProveedorProductos() {
             </div>
           </div>
 
-          {/* stock_qty — only for pedido mode */}
           {form.delivery_mode === 'pedido' && (
             <div>
               <label className="label">Disponibilidad (opcional)</label>
-              <input
-                type="number" min="0" className="input"
-                placeholder="Ej: 5 — dejar vacío para sin límite"
-                value={form.stock_qty}
-                onChange={e => setForm(f => ({ ...f, stock_qty: e.target.value }))}
-              />
-              <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4, lineHeight: 1.5 }}>
-                Vacío = sin límite (siempre disponible) · <strong>0</strong> = agotado (oculta el botón de pedir) · <strong>N</strong> = muestra "Pedido: N" en la tienda
-              </p>
+              <input type="number" min="0" className="input" placeholder="Ej: 5 — dejar vacío para sin límite" value={form.stock_qty} onChange={e => setForm(f => ({ ...f, stock_qty: e.target.value }))} />
+              <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4, lineHeight: 1.5 }}>Vacío = sin límite · <strong>0</strong> = agotado · <strong>N</strong> = muestra "Pedido: N"</p>
             </div>
           )}
 
           <div>
             <label className="label">Términos y condiciones</label>
-            <textarea className="input" rows={2} placeholder="Condiciones del producto..." value={form.terms}
-              onChange={e => setForm(f => ({ ...f, terms: e.target.value }))} style={{ resize: 'none' }} />
+            <textarea className="input" rows={2} placeholder="Condiciones del producto..." value={form.terms} onChange={e => setForm(f => ({ ...f, terms: e.target.value }))} style={{ resize: 'none' }} />
           </div>
           <div>
             <label className="label">Garantía</label>
-            <textarea className="input" rows={2} placeholder="Descripción de la garantía..." value={form.warranty}
-              onChange={e => setForm(f => ({ ...f, warranty: e.target.value }))} style={{ resize: 'none' }} />
+            <textarea className="input" rows={2} placeholder="Descripción de la garantía..." value={form.warranty} onChange={e => setForm(f => ({ ...f, warranty: e.target.value }))} style={{ resize: 'none' }} />
           </div>
           <div>
             <label className="label">¿Qué incluye?</label>
-            <textarea className="input" rows={2} placeholder="Descripción del contenido..." value={form.what_includes}
-              onChange={e => setForm(f => ({ ...f, what_includes: e.target.value }))} style={{ resize: 'none' }} />
+            <textarea className="input" rows={2} placeholder="Descripción del contenido..." value={form.what_includes} onChange={e => setForm(f => ({ ...f, what_includes: e.target.value }))} style={{ resize: 'none' }} />
           </div>
 
           {error && <Alert type="error">{error}</Alert>}
