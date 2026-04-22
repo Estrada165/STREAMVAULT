@@ -21,6 +21,7 @@ import ProveedorDistribuidores from '@/pages/proveedor/Distribuidores'
 import ProveedorVentas from '@/pages/proveedor/Ventas'
 import ProveedorSoporte from '@/pages/proveedor/Soporte'
 import ProveedorConfiguracion from '@/pages/proveedor/Configuracion'
+import ProveedorTutoriales from '@/pages/proveedor/Tutoriales'   // ← NUEVO
 
 // Distribuidor pages
 import Tienda from '@/pages/distribuidor/Tienda'
@@ -28,6 +29,7 @@ import DistDashboard from '@/pages/distribuidor/Dashboard'
 import Carrito from '@/pages/distribuidor/Carrito'
 import DistSoporte from '@/pages/distribuidor/Soporte'
 import DistPerfil from '@/pages/distribuidor/Perfil'
+import DistTutoriales from '@/pages/distribuidor/Tutoriales'     // ← NUEVO
 
 function LoadingScreen() {
   return (
@@ -46,12 +48,10 @@ function ProtectedRoute({ children, allowedRoles }) {
   if (loading) return <LoadingScreen />
   if (!profile) return <Navigate to="/login" replace />
 
-  // Check role
   if (allowedRoles && !allowedRoles.includes(profile.role)) {
     return <Navigate to="/login" replace />
   }
 
-  // Check account active (admin is always active)
   if (!isAdmin && !isActive) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--surface)] px-4">
@@ -68,7 +68,6 @@ function ProtectedRoute({ children, allowedRoles }) {
     )
   }
 
-  // Distribuidor: check if provider is active
   if (profile.role === 'distribuidor' && !isProviderActive) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--surface)] px-4">
@@ -119,6 +118,7 @@ export default function AppRouter() {
       <Route path="/proveedor/ventas" element={<ProtectedRoute allowedRoles={['proveedor']}><ProveedorVentas /></ProtectedRoute>} />
       <Route path="/proveedor/soporte" element={<ProtectedRoute allowedRoles={['proveedor']}><ProveedorSoporte /></ProtectedRoute>} />
       <Route path="/proveedor/configuracion" element={<ProtectedRoute allowedRoles={['proveedor']}><ProveedorConfiguracion /></ProtectedRoute>} />
+      <Route path="/proveedor/tutoriales" element={<ProtectedRoute allowedRoles={['proveedor']}><ProveedorTutoriales /></ProtectedRoute>} />
 
       {/* Distribuidor */}
       <Route path="/tienda" element={<ProtectedRoute allowedRoles={['distribuidor']}><Tienda /></ProtectedRoute>} />
@@ -126,6 +126,7 @@ export default function AppRouter() {
       <Route path="/carrito" element={<ProtectedRoute allowedRoles={['distribuidor']}><Carrito /></ProtectedRoute>} />
       <Route path="/soporte" element={<ProtectedRoute allowedRoles={['distribuidor']}><DistSoporte /></ProtectedRoute>} />
       <Route path="/perfil" element={<ProtectedRoute allowedRoles={['distribuidor']}><DistPerfil /></ProtectedRoute>} />
+      <Route path="/tutoriales" element={<ProtectedRoute allowedRoles={['distribuidor']}><DistTutoriales /></ProtectedRoute>} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />

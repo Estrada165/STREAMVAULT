@@ -6,12 +6,14 @@ import { PageHeader, Modal, Alert, Spinner, EmptyState, Toggle } from '@/compone
 import { IconPlus, IconEdit, IconTrash, IconBox } from '@/assets/icons'
 import { formatUSD, getLogoPath, getDeliveryTypeLabel } from '@/utils'
 
+// Tipos predefinidos + opción personalizada
 const DELIVERY_TYPES = [
   { value: 'cuenta_completa', label: 'Cuenta Completa' },
   { value: 'perfil', label: 'Perfil' },
   { value: 'iptv', label: 'IPTV' },
   { value: 'activacion_tv', label: 'Activación TV' },
   { value: 'codigo', label: 'Código' },
+  { value: 'otro', label: 'Otro (personalizado)' },
 ]
 
 function getPlatformColor(name = '') {
@@ -32,9 +34,20 @@ function getPlatformColor(name = '') {
   return '#6b7280'
 }
 
-// ─── CARD HEADER REDISEÑADO (mismo sistema que ProductCard) ───────────────────
-// Con imagen → aspect-ratio 16:9, objectFit: contain, imagen completa visible
-// Sin imagen → mismo ratio, fondo degradado, logo centrado
+// Retorna el nombre a mostrar de la plataforma (custom o de la tabla)
+function getDisplayPlatformName(product) {
+  return product.custom_platform_name || product.platforms?.name || ''
+}
+
+// Retorna el label del tipo de entrega (custom o predefinido)
+function getDisplayDeliveryType(product) {
+  if (product.delivery_type === 'otro' && product.custom_delivery_type) {
+    return product.custom_delivery_type
+  }
+  return getDeliveryTypeLabel(product.delivery_type)
+}
+
+// Card header: mismo sistema 16:9 que ProductCard
 function ProductCardHeader({ imageUrl, logoFilename, platformName, accentColor }) {
   const [imgErr, setImgErr] = useState(false)
   const [logoErr, setLogoErr] = useState(false)
@@ -43,80 +56,42 @@ function ProductCardHeader({ imageUrl, logoFilename, platformName, accentColor }
 
   return (
     <div style={{
-      width: '100%',
-      aspectRatio: '16 / 9',
-      position: 'relative',
-      overflow: 'hidden',
-      flexShrink: 0,
-      background: showImage
-        ? `${accentColor}18`
-        : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)`,
+      width: '100%', aspectRatio: '16 / 9', position: 'relative',
+      overflow: 'hidden', flexShrink: 0,
+      background: showImage ? `${accentColor}18` : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)`,
     }}>
       {showImage ? (
         <>
-          <img
-            src={imageUrl}
-            alt={platformName}
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-            onError={() => setImgErr(true)}
-          />
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%',
-            background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)',
-            pointerEvents: 'none',
-          }} />
-          {/* Chip plataforma arriba izquierda */}
-          <div style={{
-            position: 'absolute', top: 8, left: 8,
-            display: 'flex', alignItems: 'center', gap: 5,
-            background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)',
-            borderRadius: 20, padding: '3px 8px 3px 4px',
-          }}>
+          <img src={imageUrl} alt={platformName} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} onError={() => setImgErr(true)} />
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%', background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)', borderRadius: 20, padding: '3px 8px 3px 4px' }}>
             <div style={{ width: 18, height: 18, borderRadius: '50%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${accentColor}40` }}>
               {logoPath && !logoErr
                 ? <img src={logoPath} alt={platformName} style={{ width: 14, height: 14, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
                 : <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{(platformName || '?')[0]}</span>
               }
             </div>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)' }}>
-              {platformName}
-            </span>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)' }}>{platformName}</span>
           </div>
         </>
       ) : (
         <>
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{
-              position: 'absolute',
-              width: '55%', height: '55%', borderRadius: '50%',
-              background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)`,
-            }} />
-            <div style={{
-              width: 46, height: 46, borderRadius: 14,
-              background: `${accentColor}20`, border: `1.5px solid ${accentColor}35`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              overflow: 'hidden', position: 'relative',
-            }}>
+            <div style={{ position: 'absolute', width: '55%', height: '55%', borderRadius: '50%', background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)` }} />
+            <div style={{ width: 46, height: 46, borderRadius: 14, background: `${accentColor}20`, border: `1.5px solid ${accentColor}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
               {logoPath && !logoErr
                 ? <img src={logoPath} alt={platformName} style={{ width: 34, height: 34, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
                 : <span style={{ fontSize: 19, fontWeight: 800, color: accentColor }}>{(platformName || '?')[0]}</span>
               }
             </div>
           </div>
-          <p style={{
-            position: 'absolute', bottom: 8, left: 10,
-            fontSize: 9, fontWeight: 700, letterSpacing: '0.07em',
-            textTransform: 'uppercase', color: `${accentColor}cc`,
-          }}>
-            {platformName}
-          </p>
+          <p style={{ position: 'absolute', bottom: 8, left: 10, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: `${accentColor}cc` }}>{platformName}</p>
         </>
       )}
     </div>
   )
 }
 
-// ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function ProveedorProductos() {
   const { provider } = useAuth()
   const { settings } = useSettings()
@@ -128,12 +103,17 @@ export default function ProveedorProductos() {
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState({
-    platform_id: '', name: '', delivery_type: 'perfil',
+    platform_id: '', custom_platform_name: '', name: '',
+    delivery_type: 'perfil', custom_delivery_type: '',
     delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
     terms: '', warranty: '', what_includes: '', image_url: ''
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Si platform_id está vacío el proveedor quiere plataforma personalizada
+  const isCustomPlatform = form.platform_id === '__custom__'
+  const isCustomType = form.delivery_type === 'otro'
 
   useEffect(() => { if (provider) { fetchProducts(); fetchPlatforms() } }, [provider])
 
@@ -159,36 +139,60 @@ export default function ProveedorProductos() {
   const usdFromForm = penToUsd(parseFloat(form.price_pen) || 0)
 
   function openCreate() {
-    setForm({ platform_id: platforms[0]?.id || '', name: '', delivery_type: 'perfil', delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '', terms: '', warranty: '', what_includes: '', image_url: '' })
+    setForm({
+      platform_id: platforms[0]?.id || '', custom_platform_name: '',
+      name: '', delivery_type: 'perfil', custom_delivery_type: '',
+      delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
+      terms: '', warranty: '', what_includes: '', image_url: ''
+    })
     setError(''); setModal({ type: 'form' })
   }
 
   function openEdit(p) {
     setForm({
-      platform_id: p.platform_id, name: p.name, delivery_type: p.delivery_type,
-      delivery_mode: p.delivery_mode, price_pen: (p.price_usd * rate).toFixed(2),
-      duration_days: p.duration_days, stock_qty: p.stock_qty ?? '',
-      terms: p.terms || '', warranty: p.warranty || '', what_includes: p.what_includes || '',
-      image_url: p.image_url || '',
+      // Si tiene custom_platform_name, seleccionar '__custom__' en el select
+      platform_id: p.custom_platform_name ? '__custom__' : (p.platform_id || ''),
+      custom_platform_name: p.custom_platform_name || '',
+      name: p.name,
+      delivery_type: p.delivery_type,
+      custom_delivery_type: p.custom_delivery_type || '',
+      delivery_mode: p.delivery_mode,
+      price_pen: (p.price_usd * rate).toFixed(2),
+      duration_days: p.duration_days,
+      stock_qty: p.stock_qty ?? '',
+      terms: p.terms || '', warranty: p.warranty || '',
+      what_includes: p.what_includes || '', image_url: p.image_url || '',
     })
     setError(''); setModal({ type: 'form', data: p })
   }
 
   async function save() {
-    if (!form.platform_id || !form.name) return setError('Plataforma y nombre son requeridos')
+    // Validar plataforma
+    if (!isCustomPlatform && !form.platform_id) return setError('Selecciona una plataforma')
+    if (isCustomPlatform && !form.custom_platform_name.trim()) return setError('Escribe el nombre de la plataforma')
+    if (!form.name) return setError('El nombre del producto es requerido')
+    if (isCustomType && !form.custom_delivery_type.trim()) return setError('Escribe el tipo personalizado')
     const penVal = parseFloat(form.price_pen)
     if (!penVal || penVal <= 0) return setError('Ingresa un precio en soles válido')
     const priceUsd = parseFloat(penToUsd(penVal))
     if (!priceUsd) return setError('Error al convertir el precio')
+
     setSaving(true); setError('')
     try {
       const payload = {
-        platform_id: form.platform_id, name: form.name,
-        delivery_type: form.delivery_type, delivery_mode: form.delivery_mode,
-        price_usd: priceUsd, duration_days: parseInt(form.duration_days),
+        // Si es custom, platform_id = null, si no, usar el seleccionado
+        platform_id: isCustomPlatform ? null : (form.platform_id || null),
+        custom_platform_name: isCustomPlatform ? form.custom_platform_name.trim() : null,
+        name: form.name,
+        delivery_type: form.delivery_type,
+        custom_delivery_type: isCustomType ? form.custom_delivery_type.trim() : null,
+        delivery_mode: form.delivery_mode,
+        price_usd: priceUsd,
+        duration_days: parseInt(form.duration_days),
         stock_qty: form.delivery_mode === 'pedido' && form.stock_qty !== '' ? parseInt(form.stock_qty) : null,
         terms: form.terms || null, warranty: form.warranty || null,
-        what_includes: form.what_includes || null, provider_id: provider.id,
+        what_includes: form.what_includes || null,
+        provider_id: provider.id,
         image_url: form.image_url || null,
       }
       if (modal?.data) {
@@ -233,85 +237,33 @@ export default function ProveedorProductos() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }} className="stagger">
           {products.map(p => {
             const stock = stockCounts[p.id] || 0
-            const accentColor = getPlatformColor(p.platforms?.name || '')
+            const platformName = getDisplayPlatformName(p)
+            const accentColor = getPlatformColor(platformName)
             return (
-              <div
-                key={p.id}
-                style={{
-                  borderRadius: 14,
-                  border: '1px solid var(--surface-border)',
-                  overflow: 'hidden',
-                  opacity: p.is_active ? 1 : 0.5,
-                  display: 'flex', flexDirection: 'column',
-                  background: 'var(--surface-raised)',
-                  // Acento lateral izquierdo en lugar de top border — consistente con ProductCard
-                  boxShadow: `inset 3px 0 0 ${accentColor}`,
-                  transition: 'box-shadow 0.2s, transform 0.18s',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}, var(--shadow-elevated)`
-                  e.currentTarget.style.transform = 'translateY(-2px)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}`
-                  e.currentTarget.style.transform = ''
-                }}
+              <div key={p.id} style={{ borderRadius: 14, border: '1px solid var(--surface-border)', overflow: 'hidden', opacity: p.is_active ? 1 : 0.5, display: 'flex', flexDirection: 'column', background: 'var(--surface-raised)', boxShadow: `inset 3px 0 0 ${accentColor}`, transition: 'box-shadow 0.2s, transform 0.18s' }}
+                onMouseEnter={e => { e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}, var(--shadow-elevated)`; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}`; e.currentTarget.style.transform = '' }}
               >
-                {/* Header imagen */}
-                <ProductCardHeader
-                  imageUrl={p.image_url || null}
-                  logoFilename={p.platforms?.logo_filename}
-                  platformName={p.platforms?.name || ''}
-                  accentColor={accentColor}
-                />
-
-                {/* Body */}
+                <ProductCardHeader imageUrl={p.image_url || null} logoFilename={p.platforms?.logo_filename} platformName={platformName} accentColor={accentColor} />
                 <div style={{ padding: '10px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {/* Nombre */}
-                  <p style={{
-                    fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13,
-                    color: 'var(--ink)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {p.name}
-                  </p>
-
-                  {/* Tags */}
+                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
                   <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                    <span className="badge badge-neutral" style={{ fontSize: 10 }}>{getDeliveryTypeLabel(p.delivery_type)}</span>
+                    <span className="badge badge-neutral" style={{ fontSize: 10 }}>{getDisplayDeliveryType(p)}</span>
                     <span className={`badge ${p.delivery_mode === 'stock' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: 10 }}>
                       {p.delivery_mode === 'stock' ? `Stock: ${stock}` : 'A pedido'}
                     </span>
                   </div>
-
-                  {/* Precio */}
                   <div>
-                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--ink)' }}>
-                      {formatUSD(p.price_usd)}
-                    </p>
-                    <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>
-                      ≈ S/ {(p.price_usd * rate).toFixed(2)} · {p.duration_days}d
-                    </p>
+                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--ink)' }}>{formatUSD(p.price_usd)}</p>
+                    <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>≈ S/ {(p.price_usd * rate).toFixed(2)} · {p.duration_days}d</p>
                   </div>
-
-                  {/* Divisor */}
                   <div style={{ height: 1, background: 'var(--surface-border)', margin: '0 -14px' }} />
-
-                  {/* Acciones */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <button
-                      onClick={() => openEdit(p)}
-                      className="btn-secondary"
-                      style={{ flex: 1, justifyContent: 'center', fontSize: 12, padding: '7px 10px' }}
-                    >
+                    <button onClick={() => openEdit(p)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center', fontSize: 12, padding: '7px 10px' }}>
                       <IconEdit size={13} />Editar
                     </button>
                     <Toggle checked={p.is_active} onChange={() => toggleProduct(p)} />
-                    <button
-                      onClick={() => deleteProduct(p.id)}
-                      className="btn-ghost"
-                      style={{ padding: '7px 9px', color: 'var(--status-red)' }}
-                    >
+                    <button onClick={() => deleteProduct(p.id)} className="btn-ghost" style={{ padding: '7px 9px', color: 'var(--status-red)' }}>
                       <IconTrash size={13} />
                     </button>
                   </div>
@@ -322,24 +274,49 @@ export default function ProveedorProductos() {
         </div>
       )}
 
-      {/* ── Modal crear/editar (sin cambios funcionales) ── */}
+      {/* Modal crear/editar */}
       <Modal open={modal?.type === 'form'} onClose={() => setModal(null)} title={modal?.data ? 'Editar producto' : 'Nuevo producto'} maxWidth="max-w-lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '72vh', overflowY: 'auto', paddingRight: 2 }}>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div>
-              <label className="label">Plataforma *</label>
-              <select className="input" value={form.platform_id} onChange={e => setForm(f => ({ ...f, platform_id: e.target.value }))}>
-                <option value="">Seleccionar...</option>
-                {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Tipo *</label>
-              <select className="input" value={form.delivery_type} onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value }))}>
-                {DELIVERY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
+          {/* ── PLATAFORMA: select + opción manual ── */}
+          <div>
+            <label className="label">Plataforma *</label>
+            <select className="input" value={form.platform_id}
+              onChange={e => setForm(f => ({ ...f, platform_id: e.target.value, custom_platform_name: '' }))}>
+              <option value="">Seleccionar...</option>
+              {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {/* Opción manual al final */}
+              <option value="__custom__">✏️ Escribir manualmente...</option>
+            </select>
+            {/* Campo manual si eligió "Escribir manualmente" */}
+            {isCustomPlatform && (
+              <input
+                className="input" style={{ marginTop: 8 }}
+                placeholder="Ej: Windows, Autodesk, Canva Pro..."
+                value={form.custom_platform_name}
+                onChange={e => setForm(f => ({ ...f, custom_platform_name: e.target.value }))}
+                autoFocus
+              />
+            )}
+          </div>
+
+          {/* ── TIPO: select + opción manual ── */}
+          <div>
+            <label className="label">Tipo *</label>
+            <select className="input" value={form.delivery_type}
+              onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value, custom_delivery_type: '' }))}>
+              {DELIVERY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            {/* Campo manual si eligió "Otro" */}
+            {isCustomType && (
+              <input
+                className="input" style={{ marginTop: 8 }}
+                placeholder="Ej: Licencia, Membresía, Acceso..."
+                value={form.custom_delivery_type}
+                onChange={e => setForm(f => ({ ...f, custom_delivery_type: e.target.value }))}
+                autoFocus
+              />
+            )}
           </div>
 
           <div>
@@ -348,8 +325,9 @@ export default function ProveedorProductos() {
           </div>
 
           <div>
-            <label className="label">Imagen <span style={{ fontWeight: 400, color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>URL opcional — si no pones, se usa el logo de la plataforma</span></label>
+            <label className="label">Imagen <span style={{ fontWeight: 400, color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>URL opcional</span></label>
             <input className="input" placeholder="https://i.postimg.cc/tu-imagen.png" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} />
+            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Si no pones URL se usa el logo de la plataforma</p>
             {form.image_url && (
               <div style={{ marginTop: 8, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--surface-border)', aspectRatio: '16/9', background: 'var(--surface-overlay)' }}>
                 <img src={form.image_url} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={e => { e.target.parentElement.style.display = 'none' }} />

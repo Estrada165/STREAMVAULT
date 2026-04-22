@@ -7,7 +7,7 @@ import {
   LogoSV, IconHome, IconBox, IconUsers, IconShoppingCart, IconDollar,
   IconHeadphones, IconSettings, IconLogOut, IconSun, IconMoon,
   IconBell, IconMenu, IconX, IconTrendingUp, IconDatabase,
-  IconStore, IconLayers, IconMonitor
+  IconStore, IconLayers, IconMonitor, IconBook
 } from '@/assets/icons'
 
 const ADMIN_NAV = [
@@ -25,6 +25,7 @@ const PROVEEDOR_NAV = [
   { to: '/proveedor/ventas', label: 'Ventas', icon: IconTrendingUp },
   { to: '/proveedor/soporte', label: 'Soporte', icon: IconHeadphones },
   { to: '/proveedor/configuracion', label: 'Configuración', icon: IconSettings },
+  { to: '/proveedor/tutoriales', label: 'Tutoriales', icon: IconBook },
 ]
 
 const DISTRIBUIDOR_NAV = [
@@ -32,6 +33,7 @@ const DISTRIBUIDOR_NAV = [
   { to: '/dashboard', label: 'Mis Pedidos', icon: IconLayers },
   { to: '/carrito', label: 'Carrito', icon: IconShoppingCart },
   { to: '/soporte', label: 'Soporte', icon: IconHeadphones },
+  { to: '/tutoriales', label: 'Tutoriales', icon: IconBook },
   { to: '/perfil', label: 'Mi Perfil', icon: IconSettings },
 ]
 

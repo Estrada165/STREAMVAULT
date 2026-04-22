@@ -376,4 +376,4 @@ export default function AdminProveedores() {
       </Modal>
     </div>
   )
-}
+} 
