@@ -2,8 +2,26 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, Badge, Tabs } from '@/components/ui'
-import { IconSearch, IconDownload, IconEdit, IconRefreshCw } from '@/assets/icons'
+import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy } from '@/assets/icons'
 import { formatUSD, formatDateTime, formatDate, getStatusColor, getStatusLabel, getLogoPath, daysRemaining } from '@/utils'
+
+// Botón copiar pequeño
+function CopyBtn({ value }) {
+  const [copied, setCopied] = useState(false)
+  if (!value) return null
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
+      title="Copiar"
+      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: copied ? 'var(--status-green)' : 'var(--ink-faint)', flexShrink: 0 }}
+    >
+      {copied
+        ? <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        : <IconCopy size={11} />
+      }
+    </button>
+  )
+}
 
 export default function ProveedorVentas() {
   const { provider } = useAuth()
@@ -12,9 +30,9 @@ export default function ProveedorVentas() {
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState('all')
   const [modal, setModal] = useState(null)
-  const [renewModal, setRenewModal] = useState(null) // order to renew
+  const [renewModal, setRenewModal] = useState(null)
   const [renewDays, setRenewDays] = useState(30)
-  const [renewBalance, setRenewBalance] = useState(null) // distributor balance
+  const [renewBalance, setRenewBalance] = useState(null)
   const [credsForm, setCredsForm] = useState({ email: '', password: '', url: '', profile_name: '', profile_pin: '', activation_code: '', extra_notes: '' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -37,7 +55,6 @@ export default function ProveedorVentas() {
 
     if (!ordersData?.length) { setOrders([]); setLoading(false); return }
 
-    // Fetch products, users, stock separately
     const productIds = [...new Set(ordersData.map(o => o.product_id))]
     const userIds = [...new Set(ordersData.map(o => o.distributor_id))]
     const stockIds = ordersData.map(o => o.stock_item_id).filter(Boolean)
@@ -92,11 +109,9 @@ export default function ProveedorVentas() {
       }
 
       if (modal.stock_item_id) {
-        // Update existing stock item
         const { error: err } = await supabase.from('stock_items').update(payload).eq('id', modal.stock_item_id)
         if (err) throw err
       } else {
-        // Create new stock item and link to order
         const { data: si, error: siErr } = await supabase.from('stock_items').insert({
           ...payload, product_id: modal.product_id, is_sold: true,
           sold_at: new Date().toISOString(), order_id: modal.id,
@@ -111,7 +126,6 @@ export default function ProveedorVentas() {
         if (oErr) throw oErr
       }
 
-      // Notify distributor
       await supabase.from('notifications').insert({
         user_id: modal.distributor_id,
         title: modal.stock_item_id ? 'Credenciales actualizadas' : 'Credenciales disponibles',
@@ -128,7 +142,6 @@ export default function ProveedorVentas() {
   async function openRenew(order) {
     setRenewDays(30)
     setSaveError('')
-    // Fetch distributor balance
     const { data: bal } = await supabase
       .from('balances').select('amount_usd').eq('user_id', order.distributor_id).maybeSingle()
     setRenewBalance(parseFloat(bal?.amount_usd || 0))
@@ -140,39 +153,30 @@ export default function ProveedorVentas() {
     if (renewBalance < price) return setSaveError(`Saldo insuficiente. El distribuidor tiene ${formatUSD(renewBalance)} y el costo es ${formatUSD(price)}.`)
     setSaving(true); setSaveError('')
     try {
-      // Calculate new expiry: extend from current expiry if still active, or from today
       const currentExpiry = renewModal.expires_at ? new Date(renewModal.expires_at) : new Date()
       const base = currentExpiry > new Date() ? currentExpiry : new Date()
       base.setDate(base.getDate() + parseInt(renewDays))
 
-      // Update order expiry and status
       const { error: oErr } = await supabase.from('orders').update({
-        expires_at: base.toISOString(),
-        status: 'activo',
+        expires_at: base.toISOString(), status: 'activo',
         updated_at: new Date().toISOString(),
       }).eq('id', renewModal.id)
       if (oErr) throw oErr
 
-      // Deduct balance
       const newBal = renewBalance - price
       await supabase.from('balances').update({ amount_usd: newBal }).eq('user_id', renewModal.distributor_id)
 
-      // Record transaction
       await supabase.from('transactions').insert({
-        user_id: renewModal.distributor_id,
-        type: 'compra',
-        amount_usd: -price,
+        user_id: renewModal.distributor_id, type: 'compra', amount_usd: -price,
         ref_order_id: renewModal.id,
         description: `Renovación: ${renewModal.products?.name} (+${renewDays} días)`,
       })
 
-      // Notify distributor
       await supabase.from('notifications').insert({
         user_id: renewModal.distributor_id,
         title: 'Suscripción renovada',
         message: `Tu pedido ${renewModal.order_code} fue renovado por ${renewDays} días. Nueva fecha de vencimiento: ${formatDate(base.toISOString())}`,
-        type: 'success',
-        ref_id: renewModal.id,
+        type: 'success', ref_id: renewModal.id,
       })
 
       setRenewModal(null)
@@ -182,20 +186,30 @@ export default function ProveedorVentas() {
   }
 
   function exportCSV() {
-    const rows = [['Pedido', 'Producto', 'Distribuidor', 'Cliente', 'Precio', 'Estado', 'Fecha']]
-    filtered.forEach(o => rows.push([o.order_code, o.products?.name, o.user?.full_name || o.user?.email, o.client_name, o.price_paid, o.status, new Date(o.created_at).toLocaleDateString('es-PE')]))
+    const rows = [['Pedido', 'Producto', 'Distribuidor', 'Cliente', 'Correo plataforma', 'Precio', 'Estado', 'Fecha']]
+    filtered.forEach(o => rows.push([
+      o.order_code, o.products?.name,
+      o.user?.full_name || o.user?.email,
+      o.client_name, o.stock_item?.email || '',
+      o.price_paid, o.status,
+      new Date(o.created_at).toLocaleDateString('es-PE')
+    ]))
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' }))
     a.download = 'ventas.csv'; a.click()
   }
 
+  const q = search.toLowerCase()
   const filtered = orders
     .filter(o => tab === 'all' || o.status === tab)
     .filter(o =>
-      (o.order_code || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.client_name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.products?.name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.user?.full_name || o.user?.email || '').toLowerCase().includes(search.toLowerCase())
+      (o.order_code || '').toLowerCase().includes(q) ||
+      (o.client_name || '').toLowerCase().includes(q) ||
+      (o.products?.name || '').toLowerCase().includes(q) ||
+      (o.user?.full_name || '').toLowerCase().includes(q) ||
+      (o.user?.email || '').toLowerCase().includes(q) ||
+      // ← NUEVO: buscar por correo de la plataforma (stock item)
+      (o.stock_item?.email || '').toLowerCase().includes(q)
     )
 
   const totalRevenue = orders.filter(o => o.status !== 'cancelado').reduce((s, o) => s + parseFloat(o.price_paid), 0)
@@ -221,18 +235,26 @@ export default function ProveedorVentas() {
       {pendingCount > 0 && (
         <div style={{ background: 'var(--status-yellow-bg)', border: '1px solid var(--status-yellow-border)', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--status-yellow)' }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }} />
-          <strong>{pendingCount} pedido{pendingCount > 1 ? 's' : ''} pendiente{pendingCount > 1 ? 's' : ''}</strong> — haz click en <strong>Editar creds</strong> para cargarlas.
+          <strong>{pendingCount} pedido{pendingCount > 1 ? 's' : ''} pendiente{pendingCount > 1 ? 's' : ''}</strong> — haz click en <strong>Cargar</strong> para subir credenciales.
         </div>
       )}
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
           <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
-          <input className="input" style={{ paddingLeft: 36 }} placeholder="Buscar pedido, cliente, producto..."
+          <input className="input" style={{ paddingLeft: 36 }}
+            placeholder="Buscar pedido, cliente, producto, distribuidor o correo..."
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <Tabs tabs={[{ label: 'Todos', value: 'all' }, { label: 'Activos', value: 'activo' }, { label: 'Pendientes', value: 'pendiente_credenciales', count: pendingCount }, { label: 'Expirados', value: 'expirado' }]}
-          active={tab} onChange={setTab} />
+        <Tabs
+          tabs={[
+            { label: 'Todos', value: 'all' },
+            { label: 'Activos', value: 'activo' },
+            { label: 'Pendientes', value: 'pendiente_credenciales', count: pendingCount },
+            { label: 'Expirados', value: 'expirado' },
+          ]}
+          active={tab} onChange={setTab}
+        />
       </div>
 
       <div className="table-wrapper">
@@ -243,6 +265,8 @@ export default function ProveedorVentas() {
               <th>Producto</th>
               <th>Distribuidor</th>
               <th>Cliente</th>
+              {/* ── NUEVO campo ── */}
+              <th>Correo plataforma</th>
               <th>Precio</th>
               <th>Estado</th>
               <th>Fecha</th>
@@ -252,22 +276,58 @@ export default function ProveedorVentas() {
           <tbody>
             {filtered.map(o => (
               <tr key={o.id}>
-                <td><span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink-muted)' }}>#{o.order_code}</span></td>
+                <td>
+                  <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink-muted)' }}>
+                    #{o.order_code}
+                  </span>
+                </td>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <img src={getLogoPath(o.products?.platforms?.logo_filename)} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
-                    <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.products?.name}</span>
+                    <img src={getLogoPath(o.products?.platforms?.logo_filename)} alt=""
+                      style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'contain' }}
+                      onError={e => e.target.style.display = 'none'} />
+                    <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {o.products?.name}
+                    </span>
                   </div>
                 </td>
-                <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{o.user?.full_name || o.user?.email}</td>
-                <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{o.client_name || '—'}</td>
-                <td><span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700 }}>{formatUSD(o.price_paid)}</span></td>
-                <td><Badge color={getStatusColor(o.status)} dot>{getStatusLabel(o.status)}</Badge></td>
-                <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{formatDateTime(o.created_at)}</td>
+                <td style={{ fontSize: 12, color: 'var(--ink-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {o.user?.full_name || o.user?.email}
+                </td>
+                <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
+                  {o.client_name || '—'}
+                </td>
+
+                {/* ── NUEVO: correo de la plataforma ── */}
+                <td>
+                  {o.stock_item?.email ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, maxWidth: 170 }}>
+                      <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {o.stock_item.email}
+                      </span>
+                      <CopyBtn value={o.stock_item.email} />
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>
+                  )}
+                </td>
+
+                <td>
+                  <span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700 }}>
+                    {formatUSD(o.price_paid)}
+                  </span>
+                </td>
+                <td>
+                  <Badge color={getStatusColor(o.status)} dot>{getStatusLabel(o.status)}</Badge>
+                </td>
+                <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>
+                  {formatDateTime(o.created_at)}
+                </td>
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => openCredentials(o)} className="btn-secondary"
-                      style={{ fontSize: 11, padding: '5px 10px', gap: 4,
+                      style={{
+                        fontSize: 11, padding: '5px 10px', gap: 4,
                         background: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-bg)' : undefined,
                         borderColor: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-border)' : undefined,
                         color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined,
@@ -286,13 +346,17 @@ export default function ProveedorVentas() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--ink-faint)', padding: 32 }}>Sin resultados</td></tr>
+              <tr>
+                <td colSpan={9} style={{ textAlign: 'center', color: 'var(--ink-faint)', padding: 32 }}>
+                  Sin resultados
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Credentials modal */}
+      {/* Modal credenciales — sin cambios */}
       <Modal open={!!modal} onClose={() => setModal(null)} title={`${modal?.stock_item_id ? 'Editar' : 'Cargar'} credenciales — ${modal?.order_code}`} maxWidth="max-w-md">
         {modal && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -300,7 +364,6 @@ export default function ProveedorVentas() {
               <p style={{ fontWeight: 600, color: 'var(--ink)' }}>{modal.products?.name}</p>
               <p style={{ color: 'var(--ink-muted)' }}>Cliente: {modal.client_name || '—'} {modal.client_whatsapp ? `· ${modal.client_whatsapp}` : ''}</p>
             </div>
-
             {showEmail && (
               <div><label className="label">Correo</label>
                 <input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="correo@ejemplo.com" value={credsForm.email} onChange={e => setCredsForm(f => ({ ...f, email: e.target.value }))} />
@@ -337,7 +400,6 @@ export default function ProveedorVentas() {
             <div><label className="label">Nota para el distribuidor (opcional)</label>
               <textarea className="input" rows={2} style={{ resize: 'none' }} placeholder="Instrucciones adicionales..." value={credsForm.extra_notes} onChange={e => setCredsForm(f => ({ ...f, extra_notes: e.target.value }))} />
             </div>
-
             {saveError && <Alert type="error">{saveError}</Alert>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
@@ -348,11 +410,11 @@ export default function ProveedorVentas() {
           </div>
         )}
       </Modal>
-      {/* Renew modal */}
+
+      {/* Modal renovar — sin cambios */}
       <Modal open={!!renewModal} onClose={() => { setRenewModal(null); setSaveError('') }} title={`Renovar — ${renewModal?.order_code}`} maxWidth="max-w-sm">
         {renewModal && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Order info */}
             <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '12px 14px' }}>
               <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13 }}>{renewModal.products?.name}</p>
               <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>Cliente: {renewModal.client_name || '—'}</p>
@@ -362,45 +424,27 @@ export default function ProveedorVentas() {
                 </p>
               )}
             </div>
-
-            {/* Distributor balance */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 14px', borderRadius: 10,
-              background: renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green-bg)' : 'var(--status-red-bg)',
-              border: `1px solid ${renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green-border)' : 'var(--status-red-border)'}`,
-            }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green-bg)' : 'var(--status-red-bg)', border: `1px solid ${renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green-border)' : 'var(--status-red-border)'}` }}>
               <div>
                 <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Saldo del distribuidor</p>
-                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green)' : 'var(--status-red)' }}>
-                  {formatUSD(renewBalance)}
-                </p>
+                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: renewBalance >= parseFloat(renewModal.price_paid) ? 'var(--status-green)' : 'var(--status-red)' }}>{formatUSD(renewBalance)}</p>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Costo renovación</p>
-                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>
-                  {formatUSD(renewModal.price_paid)}
-                </p>
+                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>{formatUSD(renewModal.price_paid)}</p>
               </div>
             </div>
-
             {renewBalance < parseFloat(renewModal.price_paid) && (
-              <Alert type="error">
-                Saldo insuficiente. El distribuidor tiene {formatUSD(renewBalance)} y la renovación cuesta {formatUSD(renewModal.price_paid)}. Recárgale saldo primero desde la sección Distribuidores.
-              </Alert>
+              <Alert type="error">Saldo insuficiente. Recárgale saldo al distribuidor primero.</Alert>
             )}
-
-            {/* Days selector */}
             <div>
               <label className="label">Días a agregar</label>
               <select className="input" value={renewDays} onChange={e => setRenewDays(e.target.value)}>
-                {[7, 15, 30, 60, 90].map(d => (
-                  <option key={d} value={d}>{d} días</option>
-                ))}
+                {[7, 15, 30, 60, 90].map(d => <option key={d} value={d}>{d} días</option>)}
               </select>
               {renewModal.expires_at && (
                 <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 5 }}>
-                  Nueva fecha de vencimiento: <strong style={{ color: 'var(--ink)' }}>
+                  Nueva fecha: <strong style={{ color: 'var(--ink)' }}>
                     {(() => {
                       const base = new Date(renewModal.expires_at) > new Date() ? new Date(renewModal.expires_at) : new Date()
                       base.setDate(base.getDate() + parseInt(renewDays))
@@ -410,15 +454,10 @@ export default function ProveedorVentas() {
                 </p>
               )}
             </div>
-
             {saveError && <Alert type="error">{saveError}</Alert>}
-
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => { setRenewModal(null); setSaveError('') }} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-              <button
-                onClick={confirmRenew}
-                disabled={saving || renewBalance < parseFloat(renewModal.price_paid)}
-                className="btn-primary"
+              <button onClick={confirmRenew} disabled={saving || renewBalance < parseFloat(renewModal.price_paid)} className="btn-primary"
                 style={{ flex: 1, justifyContent: 'center', background: 'var(--status-green)', opacity: renewBalance < parseFloat(renewModal.price_paid) ? 0.4 : 1 }}>
                 {saving ? <Spinner size={15} /> : `Renovar y descontar ${formatUSD(renewModal.price_paid)}`}
               </button>

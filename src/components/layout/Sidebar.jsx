@@ -172,4 +172,4 @@ export default function Sidebar({ notifCount = 0, ticketCount = 0 }) {
       </aside>
     </>
   )
-}
+} 
