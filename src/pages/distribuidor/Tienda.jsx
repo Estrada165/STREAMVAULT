@@ -61,14 +61,17 @@ function ProviderLogo({ logoUrl, name, size = 44 }) {
 }
 
 // ── Modal de recarga con flujo completo ──────────────────────────────────────
-function RechargeModal({ method, provider, exchangeRate, onClose }) {
+function RechargeModal({ method, provider, profile, exchangeRate, onClose }) {
   const meta = PAYMENT_METHODS_META[method.method_key] || { label: method.method_key, logo: '' }
-  const [step, setStep] = useState(1) // 1 = monto, 2 = datos pago
+  const [step, setStep] = useState(1)
   const [usdAmount, setUsdAmount] = useState('')
 
   const penAmount = usdAmount && !isNaN(usdAmount)
     ? (parseFloat(usdAmount) * exchangeRate).toFixed(2)
     : ''
+
+  // Nombre del distribuidor para el mensaje
+  const distributorName = profile?.full_name || profile?.email?.split('@')[0] || 'Distribuidor'
 
   function handleNext() {
     if (!usdAmount || isNaN(usdAmount) || parseFloat(usdAmount) <= 0) return
@@ -79,14 +82,14 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
     const phone = (provider?.whatsapp_support || '').replace(/\D/g, '')
     if (!phone) { alert('El proveedor no tiene número de soporte configurado.'); return }
     const msg =
-      `Hola! 👋 Soy distribuidor de *${provider?.display_name || 'tu tienda'}*.\n\n` +
+      `Hola! 👋 Soy *${distributorName}*, distribuidor de *${provider?.display_name || 'tu tienda'}*.\n\n` +
       `He realizado una recarga por:\n` +
       `💵 *$${parseFloat(usdAmount).toFixed(2)} USD*\n` +
       `🪙 *S/ ${penAmount} PEN*\n\n` +
       `Método: *${meta.label}*\n` +
       `Titular: *${method.holder_name}*\n\n` +
-      `Por favor me confirma cuando este listo. ¡Gracias! 🙏\n\n` +
-      `_(Envio el comprobante de pago)_`
+      `Por favor me confirma cuando esté listo. ¡Gracias! 🙏\n\n` +
+      `_(Envío el comprobante de pago)_`
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
     onClose()
   }
@@ -108,7 +111,6 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
 
         {step === 1 && (
           <>
-            {/* Monto en USD */}
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', display: 'block', marginBottom: 6 }}>
                 Monto a recargar (USD)
@@ -127,19 +129,14 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
               </div>
             </div>
 
-            {/* Conversión automática */}
             {penAmount && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', borderRadius: 10, padding: '10px 14px' }}>
                 <p style={{ fontSize: 13, color: 'var(--status-green)' }}>Equivale a transferir:</p>
-                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--status-green)' }}>
-                  S/ {penAmount}
-                </p>
+                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--status-green)' }}>S/ {penAmount}</p>
               </div>
             )}
 
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', textAlign: 'center' }}>
-              TC: 1 USD = S/ {exchangeRate}
-            </p>
+            <p style={{ fontSize: 11, color: 'var(--ink-faint)', textAlign: 'center' }}>TC: 1 USD = S/ {exchangeRate}</p>
 
             <button
               onClick={handleNext}
@@ -154,7 +151,6 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
 
         {step === 2 && (
           <>
-            {/* Resumen del monto */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--surface-border)' }}>
               <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Monto a transferir</p>
               <div style={{ textAlign: 'right' }}>
@@ -163,7 +159,6 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
               </div>
             </div>
 
-            {/* Titular */}
             <div>
               <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 6 }}>Titular</p>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', borderRadius: 10, padding: '10px 12px' }}>
@@ -172,7 +167,6 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
               </div>
             </div>
 
-            {/* Número / ID */}
             <div>
               <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 6 }}>
                 {method.method_key === 'binance' ? 'ID de Binance Pay' : 'Número'}
@@ -188,9 +182,7 @@ function RechargeModal({ method, provider, exchangeRate, onClose }) {
             </p>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setStep(1)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>
-                ← Atrás
-              </button>
+              <button onClick={() => setStep(1)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>← Atrás</button>
               <button onClick={sendWhatsApp} className="btn-primary"
                 style={{ flex: 2, justifyContent: 'center', background: '#25d366', borderColor: '#25d366' }}>
                 <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
@@ -221,7 +213,7 @@ export default function Tienda() {
   const [filterPlatform, setFilterPlatform] = useState('all')
   const [added, setAdded] = useState(null)
   const [paymentMethods, setPaymentMethods] = useState([])
-  const [selectedMethod, setSelectedMethod] = useState(null) // abre el modal de recarga
+  const [selectedMethod, setSelectedMethod] = useState(null)
 
   useEffect(() => { if (provider) fetchProducts() }, [provider])
 
@@ -297,7 +289,7 @@ export default function Tienda() {
         </div>
       </div>
 
-      {/* MÉTODOS DE RECARGA — ahora abren el RechargeModal con flujo completo */}
+      {/* MÉTODOS DE RECARGA */}
       {paymentMethods.length > 0 && (
         <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', borderRadius: 12 }}>
           <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-faint)', flexShrink: 0 }}>Recargar:</span>
@@ -356,11 +348,12 @@ export default function Tienda() {
         )
       }
 
-      {/* MODAL DE RECARGA CON FLUJO COMPLETO */}
+      {/* MODAL DE RECARGA — ahora pasa profile para incluir nombre del distribuidor */}
       {selectedMethod && (
         <RechargeModal
           method={selectedMethod}
           provider={provider}
+          profile={profile}
           exchangeRate={exchangeRate}
           onClose={() => setSelectedMethod(null)}
         />

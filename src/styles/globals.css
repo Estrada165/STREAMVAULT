@@ -359,6 +359,8 @@ body {
   max-width: 480px;
   box-shadow: var(--shadow-elevated);
   animation: slideUp 0.3s ease;
+  max-height: 90vh;      /* ← AGREGA ESTO */
+  overflow-y: auto;      /* ← AGREGA ESTO */
 }
 
 /* ============================================================

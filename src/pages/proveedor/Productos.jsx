@@ -3,10 +3,9 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useSettings } from '@/hooks/useSettings'
 import { PageHeader, Modal, Alert, Spinner, EmptyState, Toggle } from '@/components/ui'
-import { IconPlus, IconEdit, IconTrash, IconBox } from '@/assets/icons'
+import { IconPlus, IconEdit, IconTrash, IconBox, IconRefreshCw } from '@/assets/icons'
 import { formatUSD, getLogoPath, getDeliveryTypeLabel } from '@/utils'
 
-// Tipos predefinidos + opción personalizada
 const DELIVERY_TYPES = [
   { value: 'cuenta_completa', label: 'Cuenta Completa' },
   { value: 'perfil', label: 'Perfil' },
@@ -34,42 +33,29 @@ function getPlatformColor(name = '') {
   return '#6b7280'
 }
 
-// Retorna el nombre a mostrar de la plataforma (custom o de la tabla)
 function getDisplayPlatformName(product) {
   return product.custom_platform_name || product.platforms?.name || ''
 }
 
-// Retorna el label del tipo de entrega (custom o predefinido)
 function getDisplayDeliveryType(product) {
-  if (product.delivery_type === 'otro' && product.custom_delivery_type) {
-    return product.custom_delivery_type
-  }
+  if (product.delivery_type === 'otro' && product.custom_delivery_type) return product.custom_delivery_type
   return getDeliveryTypeLabel(product.delivery_type)
 }
 
-// Card header: mismo sistema 16:9 que ProductCard
 function ProductCardHeader({ imageUrl, logoFilename, platformName, accentColor }) {
   const [imgErr, setImgErr] = useState(false)
   const [logoErr, setLogoErr] = useState(false)
   const logoPath = getLogoPath(logoFilename)
   const showImage = imageUrl && !imgErr
-
   return (
-    <div style={{
-      width: '100%', aspectRatio: '16 / 9', position: 'relative',
-      overflow: 'hidden', flexShrink: 0,
-      background: showImage ? `${accentColor}18` : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)`,
-    }}>
+    <div style={{ width: '100%', aspectRatio: '16 / 9', position: 'relative', overflow: 'hidden', flexShrink: 0, background: showImage ? `${accentColor}18` : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)` }}>
       {showImage ? (
         <>
           <img src={imageUrl} alt={platformName} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} onError={() => setImgErr(true)} />
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%', background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)', pointerEvents: 'none' }} />
           <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)', borderRadius: 20, padding: '3px 8px 3px 4px' }}>
             <div style={{ width: 18, height: 18, borderRadius: '50%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${accentColor}40` }}>
-              {logoPath && !logoErr
-                ? <img src={logoPath} alt={platformName} style={{ width: 14, height: 14, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
-                : <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{(platformName || '?')[0]}</span>
-              }
+              {logoPath && !logoErr ? <img src={logoPath} alt={platformName} style={{ width: 14, height: 14, objectFit: 'contain' }} onError={() => setLogoErr(true)} /> : <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{(platformName || '?')[0]}</span>}
             </div>
             <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)' }}>{platformName}</span>
           </div>
@@ -79,10 +65,7 @@ function ProductCardHeader({ imageUrl, logoFilename, platformName, accentColor }
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ position: 'absolute', width: '55%', height: '55%', borderRadius: '50%', background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)` }} />
             <div style={{ width: 46, height: 46, borderRadius: 14, background: `${accentColor}20`, border: `1.5px solid ${accentColor}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
-              {logoPath && !logoErr
-                ? <img src={logoPath} alt={platformName} style={{ width: 34, height: 34, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
-                : <span style={{ fontSize: 19, fontWeight: 800, color: accentColor }}>{(platformName || '?')[0]}</span>
-              }
+              {logoPath && !logoErr ? <img src={logoPath} alt={platformName} style={{ width: 34, height: 34, objectFit: 'contain' }} onError={() => setLogoErr(true)} /> : <span style={{ fontSize: 19, fontWeight: 800, color: accentColor }}>{(platformName || '?')[0]}</span>}
             </div>
           </div>
           <p style={{ position: 'absolute', bottom: 8, left: 10, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: `${accentColor}cc` }}>{platformName}</p>
@@ -106,14 +89,17 @@ export default function ProveedorProductos() {
     platform_id: '', custom_platform_name: '', name: '',
     delivery_type: 'perfil', custom_delivery_type: '',
     delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
-    terms: '', warranty: '', what_includes: '', image_url: ''
+    terms: '', warranty: '', what_includes: '', image_url: '',
+    is_renewable: false, renewal_price_pen: '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Si platform_id está vacío el proveedor quiere plataforma personalizada
   const isCustomPlatform = form.platform_id === '__custom__'
   const isCustomType = form.delivery_type === 'otro'
+  const penToUsd = (pen) => pen > 0 ? (pen / rate).toFixed(2) : ''
+  const usdFromForm = penToUsd(parseFloat(form.price_pen) || 0)
+  const renewalUsdFromForm = penToUsd(parseFloat(form.renewal_price_pen) || 0)
 
   useEffect(() => { if (provider) { fetchProducts(); fetchPlatforms() } }, [provider])
 
@@ -135,39 +121,35 @@ export default function ProveedorProductos() {
     setPlatforms(data || [])
   }
 
-  const penToUsd = (pen) => pen > 0 ? (pen / rate).toFixed(2) : ''
-  const usdFromForm = penToUsd(parseFloat(form.price_pen) || 0)
-
   function openCreate() {
     setForm({
       platform_id: platforms[0]?.id || '', custom_platform_name: '',
       name: '', delivery_type: 'perfil', custom_delivery_type: '',
       delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
-      terms: '', warranty: '', what_includes: '', image_url: ''
+      terms: '', warranty: '', what_includes: '', image_url: '',
+      is_renewable: false, renewal_price_pen: '',
     })
     setError(''); setModal({ type: 'form' })
   }
 
   function openEdit(p) {
     setForm({
-      // Si tiene custom_platform_name, seleccionar '__custom__' en el select
       platform_id: p.custom_platform_name ? '__custom__' : (p.platform_id || ''),
       custom_platform_name: p.custom_platform_name || '',
-      name: p.name,
-      delivery_type: p.delivery_type,
+      name: p.name, delivery_type: p.delivery_type,
       custom_delivery_type: p.custom_delivery_type || '',
       delivery_mode: p.delivery_mode,
       price_pen: (p.price_usd * rate).toFixed(2),
-      duration_days: p.duration_days,
-      stock_qty: p.stock_qty ?? '',
+      duration_days: p.duration_days, stock_qty: p.stock_qty ?? '',
       terms: p.terms || '', warranty: p.warranty || '',
       what_includes: p.what_includes || '', image_url: p.image_url || '',
+      is_renewable: p.is_renewable || false,
+      renewal_price_pen: p.renewal_price_usd ? (p.renewal_price_usd * rate).toFixed(2) : '',
     })
     setError(''); setModal({ type: 'form', data: p })
   }
 
   async function save() {
-    // Validar plataforma
     if (!isCustomPlatform && !form.platform_id) return setError('Selecciona una plataforma')
     if (isCustomPlatform && !form.custom_platform_name.trim()) return setError('Escribe el nombre de la plataforma')
     if (!form.name) return setError('El nombre del producto es requerido')
@@ -177,10 +159,15 @@ export default function ProveedorProductos() {
     const priceUsd = parseFloat(penToUsd(penVal))
     if (!priceUsd) return setError('Error al convertir el precio')
 
+    let renewalPriceUsd = null
+    if (form.is_renewable) {
+      const rp = parseFloat(form.renewal_price_pen)
+      renewalPriceUsd = rp > 0 ? parseFloat(penToUsd(rp)) : priceUsd
+    }
+
     setSaving(true); setError('')
     try {
       const payload = {
-        // Si es custom, platform_id = null, si no, usar el seleccionado
         platform_id: isCustomPlatform ? null : (form.platform_id || null),
         custom_platform_name: isCustomPlatform ? form.custom_platform_name.trim() : null,
         name: form.name,
@@ -194,6 +181,8 @@ export default function ProveedorProductos() {
         what_includes: form.what_includes || null,
         provider_id: provider.id,
         image_url: form.image_url || null,
+        is_renewable: form.is_renewable,
+        renewal_price_usd: renewalPriceUsd,
       }
       if (modal?.data) {
         const { error: err } = await supabase.from('products').update(payload).eq('id', modal.data.id)
@@ -223,10 +212,8 @@ export default function ProveedorProductos() {
 
   return (
     <div>
-      <PageHeader
-        title="Productos" subtitle="Gestiona tu catálogo de streaming"
-        action={<button className="btn-primary" onClick={openCreate}><IconPlus size={15} />Nuevo producto</button>}
-      />
+      <PageHeader title="Productos" subtitle="Gestiona tu catálogo de streaming"
+        action={<button className="btn-primary" onClick={openCreate}><IconPlus size={15} />Nuevo producto</button>} />
 
       {products.length === 0 ? (
         <div className="card">
@@ -252,10 +239,20 @@ export default function ProveedorProductos() {
                     <span className={`badge ${p.delivery_mode === 'stock' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: 10 }}>
                       {p.delivery_mode === 'stock' ? `Stock: ${stock}` : 'A pedido'}
                     </span>
+                    {p.is_renewable && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 99, background: 'var(--status-green-bg)', color: 'var(--status-green)', border: '1px solid var(--status-green-border)' }}>
+                        <IconRefreshCw size={9} />Renovable
+                      </span>
+                    )}
                   </div>
                   <div>
                     <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--ink)' }}>{formatUSD(p.price_usd)}</p>
                     <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>≈ S/ {(p.price_usd * rate).toFixed(2)} · {p.duration_days}d</p>
+                    {p.is_renewable && p.renewal_price_usd && parseFloat(p.renewal_price_usd) !== parseFloat(p.price_usd) && (
+                      <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <IconRefreshCw size={9} />Renov. {formatUSD(p.renewal_price_usd)} ≈ S/ {(p.renewal_price_usd * rate).toFixed(2)}
+                      </p>
+                    )}
                   </div>
                   <div style={{ height: 1, background: 'var(--surface-border)', margin: '0 -14px' }} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -274,48 +271,32 @@ export default function ProveedorProductos() {
         </div>
       )}
 
-      {/* Modal crear/editar */}
       <Modal open={modal?.type === 'form'} onClose={() => setModal(null)} title={modal?.data ? 'Editar producto' : 'Nuevo producto'} maxWidth="max-w-lg">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '72vh', overflowY: 'auto', paddingRight: 2 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingRight: 4, paddingBottom: 4 }}>
 
-          {/* ── PLATAFORMA: select + opción manual ── */}
+          {/* Plataforma */}
           <div>
             <label className="label">Plataforma *</label>
-            <select className="input" value={form.platform_id}
-              onChange={e => setForm(f => ({ ...f, platform_id: e.target.value, custom_platform_name: '' }))}>
+            <select className="input" value={form.platform_id} onChange={e => setForm(f => ({ ...f, platform_id: e.target.value, custom_platform_name: '' }))}>
               <option value="">Seleccionar...</option>
               {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              {/* Opción manual al final */}
               <option value="__custom__">✏️ Escribir manualmente...</option>
             </select>
-            {/* Campo manual si eligió "Escribir manualmente" */}
             {isCustomPlatform && (
-              <input
-                className="input" style={{ marginTop: 8 }}
-                placeholder="Ej: Windows, Autodesk, Canva Pro..."
-                value={form.custom_platform_name}
-                onChange={e => setForm(f => ({ ...f, custom_platform_name: e.target.value }))}
-                autoFocus
-              />
+              <input className="input" style={{ marginTop: 8 }} placeholder="Ej: Windows, Autodesk, Canva Pro..."
+                value={form.custom_platform_name} onChange={e => setForm(f => ({ ...f, custom_platform_name: e.target.value }))} autoFocus />
             )}
           </div>
 
-          {/* ── TIPO: select + opción manual ── */}
+          {/* Tipo */}
           <div>
             <label className="label">Tipo *</label>
-            <select className="input" value={form.delivery_type}
-              onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value, custom_delivery_type: '' }))}>
+            <select className="input" value={form.delivery_type} onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value, custom_delivery_type: '' }))}>
               {DELIVERY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
-            {/* Campo manual si eligió "Otro" */}
             {isCustomType && (
-              <input
-                className="input" style={{ marginTop: 8 }}
-                placeholder="Ej: Licencia, Membresía, Acceso..."
-                value={form.custom_delivery_type}
-                onChange={e => setForm(f => ({ ...f, custom_delivery_type: e.target.value }))}
-                autoFocus
-              />
+              <input className="input" style={{ marginTop: 8 }} placeholder="Ej: Licencia, Membresía, Acceso..."
+                value={form.custom_delivery_type} onChange={e => setForm(f => ({ ...f, custom_delivery_type: e.target.value }))} autoFocus />
             )}
           </div>
 
@@ -381,8 +362,39 @@ export default function ProveedorProductos() {
             <textarea className="input" rows={2} placeholder="Descripción del contenido..." value={form.what_includes} onChange={e => setForm(f => ({ ...f, what_includes: e.target.value }))} style={{ resize: 'none' }} />
           </div>
 
-          {error && <Alert type="error">{error}</Alert>}
+          {/* ── RENOVACIÓN — al final para no bloquear el scroll ── */}
+          <div style={{ borderRadius: 12, border: `2px solid ${form.is_renewable ? 'var(--status-green-border)' : 'var(--surface-border)'}`, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: form.is_renewable ? 'var(--status-green-bg)' : 'var(--surface-overlay)', cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setForm(f => ({ ...f, is_renewable: !f.is_renewable, renewal_price_pen: !f.is_renewable ? f.price_pen : '' }))}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 9, background: form.is_renewable ? 'var(--status-green)' : 'var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', flexShrink: 0 }}>
+                  <IconRefreshCw size={15} style={{ color: form.is_renewable ? '#fff' : 'var(--ink-faint)' }} />
+                </div>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: form.is_renewable ? 'var(--status-green)' : 'var(--ink)' }}>Producto renovable</p>
+                  <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>Activa para configurar precio de renovación</p>
+                </div>
+              </div>
+              <div style={{ width: 42, height: 24, borderRadius: 99, background: form.is_renewable ? 'var(--status-green)' : 'var(--surface-border)', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
+                <div style={{ position: 'absolute', top: 4, left: form.is_renewable ? 22 : 4, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
+              </div>
+            </div>
+            {form.is_renewable && (
+              <div style={{ padding: '12px 14px', borderTop: `1px solid var(--status-green-border)`, background: 'var(--surface-raised)' }}>
+                <label className="label">Precio de renovación en S/ Soles</label>
+                <input type="number" step="0.10" min="0" className="input"
+                  placeholder={`Dejar vacío = mismo precio (S/ ${form.price_pen || '0.00'})`}
+                  value={form.renewal_price_pen}
+                  onChange={e => setForm(f => ({ ...f, renewal_price_pen: e.target.value }))} />
+                {form.renewal_price_pen > 0
+                  ? <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 4 }}>= {formatUSD(renewalUsdFromForm)} (TC: S/{rate})</p>
+                  : <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Si lo dejas vacío, el precio de renovación será igual al precio base</p>
+                }
+              </div>
+            )}
+          </div>
 
+          {error && <Alert type="error">{error}</Alert>}
           <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
             <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
             <button onClick={save} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
