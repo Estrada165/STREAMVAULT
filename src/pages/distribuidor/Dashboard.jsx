@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useBalance } from '@/hooks/useBalance'
 import { PageHeader, EmptyState, Spinner, Tabs, StatCard } from '@/components/ui'
 import OrderCard from '@/components/shared/OrderCard'
-import { IconBox, IconDollar, IconCheck, IconClock } from '@/assets/icons'
+import { IconBox, IconDollar, IconCheck, IconClock, IconSearch } from '@/assets/icons'
 import { formatUSD } from '@/utils'
 
 export default function DistDashboard() {
@@ -14,6 +14,7 @@ export default function DistDashboard() {
   const [template, setTemplate] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('activo')
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     if (profile) { fetchOrders(); fetchTemplate() }
@@ -42,7 +43,6 @@ export default function DistDashboard() {
     const stockIds = [...new Set(ordersData.map(o => o.stock_item_id).filter(Boolean))]
 
     const [{ data: products }, { data: stocks }] = await Promise.all([
-      // ← image_url añadido aquí para que OrderCard pueda mostrarlo
       supabase.from('products').select('id, name, duration_days, delivery_type, provider_id, image_url, platforms(name, logo_filename), providers:provider_id(whatsapp_support)').in('id', productIds),
       stockIds.length ? supabase.from('stock_items').select('id, email, password, url, profile_name, profile_pin, activation_code, extra_notes').in('id', stockIds) : { data: [] }
     ])
@@ -65,12 +65,28 @@ export default function DistDashboard() {
     setTemplate(data?.template_text || null)
   }
 
-  const filtered = tab === 'all' ? orders : orders.filter(o => o.status === tab)
   const stats = {
     active: orders.filter(o => o.status === 'activo').length,
     pending: orders.filter(o => o.status === 'pendiente_credenciales').length,
     expired: orders.filter(o => o.status === 'expirado').length,
   }
+
+  // Filtrar por tab primero, luego por búsqueda
+  const byTab = tab === 'all' ? orders : orders.filter(o => o.status === tab)
+
+  const filtered = search.trim()
+    ? byTab.filter(o => {
+        const q = search.toLowerCase()
+        return (
+          (o.client_name || '').toLowerCase().includes(q) ||
+          (o.client_whatsapp || '').includes(q) ||
+          (o.order_code || '').toLowerCase().includes(q) ||
+          (o.products?.name || '').toLowerCase().includes(q) ||
+          (o.products?.platforms?.name || '').toLowerCase().includes(q) ||
+          (o.stock_items?.email || '').toLowerCase().includes(q)
+        )
+      })
+    : byTab
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={28} /></div>
 
@@ -85,7 +101,7 @@ export default function DistDashboard() {
         <StatCard label="Expirados" value={stats.expired} icon={IconBox} color="neutral" />
       </div>
 
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 12 }}>
         <Tabs
           tabs={[
             { label: 'Activos', value: 'activo', count: stats.active },
@@ -93,19 +109,55 @@ export default function DistDashboard() {
             { label: 'Expirados', value: 'expirado' },
             { label: 'Todos', value: 'all' },
           ]}
-          active={tab} onChange={setTab}
+          active={tab} onChange={v => { setTab(v); setSearch('') }}
         />
       </div>
 
+      {/* Buscador */}
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
+        <input
+          className="input"
+          style={{ paddingLeft: 36 }}
+          placeholder="Buscar por cliente, plataforma, correo, código..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 16, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+
       {filtered.length === 0 ? (
-        <EmptyState icon={IconBox} title="Sin pedidos"
-          description={tab === 'activo' ? 'No tienes suscripciones activas. Ve a la tienda para comprar.' : 'No hay pedidos en esta categoría.'} />
+        <EmptyState
+          icon={IconBox}
+          title={search ? 'Sin resultados' : 'Sin pedidos'}
+          description={
+            search
+              ? `No hay pedidos que coincidan con "${search}".`
+              : tab === 'activo'
+              ? 'No tienes suscripciones activas. Ve a la tienda para comprar.'
+              : 'No hay pedidos en esta categoría.'
+          }
+        />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
-          {filtered.map(order => (
-            <OrderCard key={order.id} order={order} template={template} onCredentialsUpdated={fetchOrders} />
-          ))}
-        </div>
+        <>
+          {search && (
+            <p style={{ fontSize: 12, color: 'var(--ink-faint)', marginBottom: 10 }}>
+              {filtered.length} resultado{filtered.length !== 1 ? 's' : ''} para "{search}"
+            </p>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
+            {filtered.map(order => (
+              <OrderCard key={order.id} order={order} template={template} onCredentialsUpdated={fetchOrders} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
