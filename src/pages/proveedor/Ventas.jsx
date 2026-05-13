@@ -35,6 +35,11 @@ export default function ProveedorVentas() {
   useEffect(() => { if (provider) fetchOrders() }, [provider])
 
   async function fetchOrders() {
+    setLoading(true)
+    setOrders([]) // Limpiar estado viejo para evitar datos mezclados
+    // Primero marcar expiradas en BD, luego cargar datos frescos
+    try { await supabase.rpc('mark_expired_orders') } catch (_) {}
+
     const { data: products } = await supabase
       .from('products').select('id, delivery_type').eq('provider_id', provider.id)
     if (!products?.length) { setLoading(false); return }
@@ -55,7 +60,6 @@ export default function ProveedorVentas() {
     const stockIds = ordersData.map(o => o.stock_item_id).filter(Boolean)
 
     const [{ data: prods }, { data: users }, { data: stocks }] = await Promise.all([
-      // ── Incluir is_renewable y renewal_price_usd ──
       supabase.from('products').select('id, name, is_renewable, renewal_price_usd, platforms(name, logo_filename)').in('id', productIds),
       supabase.from('users').select('id, full_name, email').in('id', userIds),
       stockIds.length ? supabase.from('stock_items').select('*').in('id', stockIds) : { data: [] },
@@ -134,9 +138,6 @@ export default function ProveedorVentas() {
     setRenewModal(order)
   }
 
-  // ── Calcula el costo real de renovación ──
-  // Si el producto tiene renewal_price_usd configurado, usar ese.
-  // Si no, usar price_paid (precio original de la orden).
   function getRenewalCost(order) {
     const prod = order.products
     if (prod?.is_renewable && prod?.renewal_price_usd && parseFloat(prod.renewal_price_usd) > 0) {
@@ -250,11 +251,17 @@ export default function ProveedorVentas() {
           <thead>
             <tr>
               <th>Pedido</th><th>Producto</th><th>Distribuidor</th><th>Cliente</th>
-              <th>Correo plataforma</th><th>Precio</th><th>Estado</th><th>Fecha</th><th>Creds</th>
+              <th>Correo plataforma</th><th>Precio</th><th>Estado</th><th>Inicio</th><th>Vence</th><th>Creds</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(o => (
+            {filtered.map(o => {
+              // Si expires_at ya pasó pero status sigue 'activo', mostrarlo como expirado visualmente
+              const isReallyExpired = o.status === 'activo' && o.expires_at && new Date(o.expires_at) < new Date()
+              const displayStatus = isReallyExpired ? 'expirado' : o.status
+              const expiresSoon = o.status === 'activo' && o.expires_at && !isReallyExpired &&
+                (new Date(o.expires_at) - new Date()) < 3 * 24 * 60 * 60 * 1000 // menos de 3 días
+              return (
               <tr key={o.id}>
                 <td><span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink-muted)' }}>#{o.order_code}</span></td>
                 <td>
@@ -274,8 +281,20 @@ export default function ProveedorVentas() {
                   ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
                 </td>
                 <td><span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700 }}>{formatUSD(o.price_paid)}</span></td>
-                <td><Badge color={getStatusColor(o.status)} dot>{getStatusLabel(o.status)}</Badge></td>
+                <td><Badge color={getStatusColor(displayStatus)} dot>{getStatusLabel(displayStatus)}</Badge></td>
                 <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{formatDateTime(o.created_at)}</td>
+                <td>
+                  {o.expires_at ? (
+                    <span style={{
+                      fontSize: 11, fontWeight: 500,
+                      color: isReallyExpired ? 'var(--status-red)' : expiresSoon ? 'var(--status-yellow)' : 'var(--ink-muted)'
+                    }}>
+                      {formatDate(o.expires_at)}
+                      {expiresSoon && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-yellow)' }}>Vence pronto</span>}
+                      {isReallyExpired && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-red)' }}>Vencida</span>}
+                    </span>
+                  ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
+                </td>
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => openCredentials(o)} className="btn-secondary"
@@ -285,7 +304,7 @@ export default function ProveedorVentas() {
                         color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined }}>
                       <IconEdit size={12} />{o.status === 'pendiente_credenciales' ? 'Cargar' : 'Editar'}
                     </button>
-                    {(o.status === 'activo' || o.status === 'expirado') && (
+                    {(o.status === 'activo' || o.status === 'expirado' || isReallyExpired) && (
                       <button onClick={() => openRenew(o)} className="btn-secondary"
                         style={{ fontSize: 11, padding: '5px 10px', gap: 4, color: 'var(--status-green)', borderColor: 'var(--status-green-border)', background: 'var(--status-green-bg)' }}>
                         <IconRefreshCw size={12} />Renovar
@@ -294,9 +313,9 @@ export default function ProveedorVentas() {
                   </div>
                 </td>
               </tr>
-            ))}
+            )})}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--ink-faint)', padding: 32 }}>Sin resultados</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--ink-faint)', padding: 32 }}>Sin resultados</td></tr>
             )}
           </tbody>
         </table>
@@ -335,7 +354,7 @@ export default function ProveedorVentas() {
         )}
       </Modal>
 
-      {/* Modal renovar — ahora usa renewal_price_usd si existe */}
+      {/* Modal renovar */}
       <Modal open={!!renewModal} onClose={() => { setRenewModal(null); setSaveError('') }} title={`Renovar — ${renewModal?.order_code}`} maxWidth="max-w-sm">
         {renewModal && (() => {
           const cost = getRenewalCost(renewModal)
@@ -355,7 +374,6 @@ export default function ProveedorVentas() {
                 )}
               </div>
 
-              {/* Aviso si el precio de renovación es diferente al original */}
               {hasDiff && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', borderRadius: 10, fontSize: 12, color: 'var(--status-green)' }}>
                   <IconRefreshCw size={13} />
