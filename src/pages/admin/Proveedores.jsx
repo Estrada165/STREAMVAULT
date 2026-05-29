@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState } from '@/components/ui'
+import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs } from '@/components/ui'
 import { IconUsers, IconSearch, IconEdit, IconTrash, IconWhatsApp } from '@/assets/icons'
 import { daysRemaining, getDaysColor, formatDate } from '@/utils'
 
@@ -8,6 +8,7 @@ export default function AdminProveedores() {
   const [providers, setProviders] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filterTab, setFilterTab] = useState('all')
   const [modal, setModal] = useState(null)
   const [extendDays, setExtendDays] = useState(30)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
@@ -114,13 +115,27 @@ export default function AdminProveedores() {
     setSaving(false)
   }
 
-  const filtered = providers.filter(p =>
+  // ── Filtro por tab ──────────────────────────────────────────
+  const byTab = providers.filter(p => {
+    if (filterTab === 'activo') return p.is_active
+    if (filterTab === 'inactivo') return !p.is_active && p.expires_at  // tiene cuenta pero desactivado
+    if (filterTab === 'pendiente') return !p.is_active && !p.expires_at // nunca activado
+    return true // 'all'
+  })
+
+  const filtered = byTab.filter(p =>
     (p.display_name || p.users?.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
     (p.users?.email || '').toLowerCase().includes(search.toLowerCase()) ||
     (p.slug || '').includes(search.toLowerCase())
   )
 
-  // Botón de acción compacto
+  const counts = {
+    all: providers.length,
+    activo: providers.filter(p => p.is_active).length,
+    pendiente: providers.filter(p => !p.is_active && !p.expires_at).length,
+    inactivo: providers.filter(p => !p.is_active && p.expires_at).length,
+  }
+
   const Btn = ({ onClick, title, children, variant = 'ghost', color }) => {
     const base = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, width: 32, height: 32, borderRadius: 8, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, sans-serif', fontSize: 12, transition: 'opacity 0.15s', flexShrink: 0 }
     const styles = {
@@ -143,6 +158,20 @@ export default function AdminProveedores() {
         }
       />
 
+      {/* ── Tabs de filtro ── */}
+      <div style={{ marginBottom: 14 }}>
+        <Tabs
+          tabs={[
+            { label: 'Todos', value: 'all', count: counts.all },
+            { label: 'Activos', value: 'activo', count: counts.activo },
+            { label: 'Pendientes', value: 'pendiente', count: counts.pendiente },
+            { label: 'Desactivados', value: 'inactivo', count: counts.inactivo },
+          ]}
+          active={filterTab}
+          onChange={v => { setFilterTab(v); setSearch('') }}
+        />
+      </div>
+
       <div style={{ position: 'relative', marginBottom: 16 }}>
         <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
         <input className="input" style={{ paddingLeft: 36 }} placeholder="Buscar por nombre, email o código..."
@@ -152,9 +181,8 @@ export default function AdminProveedores() {
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={28} /></div>
       ) : filtered.length === 0 ? (
-        <div className="card"><EmptyState icon={IconUsers} title="Sin proveedores" description="Los proveedores aparecen aquí cuando se registran en la app." /></div>
+        <div className="card"><EmptyState icon={IconUsers} title="Sin proveedores" description={filterTab === 'pendiente' ? 'No hay proveedores pendientes de activación.' : filterTab === 'inactivo' ? 'No hay proveedores desactivados.' : 'Los proveedores aparecen aquí cuando se registran en la app.'} /></div>
       ) : (
-        /* Cards en lugar de tabla — más adaptables y estéticas */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {filtered.map(p => {
             const days = p.expires_at ? daysRemaining(p.expires_at) : null
@@ -171,8 +199,6 @@ export default function AdminProveedores() {
                 padding: '12px 16px',
                 display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               }}>
-
-                {/* ── Identidad ── */}
                 <div style={{ flex: '1 1 180px', minWidth: 0 }}>
                   <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 2 }}>
                     {p.display_name || p.users?.full_name || '—'}
@@ -184,11 +210,10 @@ export default function AdminProveedores() {
                     <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'var(--surface-overlay)', padding: '2px 7px', borderRadius: 6, color: 'var(--ink-muted)', border: '1px solid var(--surface-border)' }}>
                       {p.slug}
                     </span>
-                    <Badge color={p.is_active ? 'green' : 'red'} dot>{p.is_active ? 'Activo' : 'Inactivo'}</Badge>
+                    <Badge color={p.is_active ? 'green' : 'red'} dot>{p.is_active ? 'Activo' : !p.expires_at ? 'Pendiente' : 'Inactivo'}</Badge>
                   </div>
                 </div>
 
-                {/* ── Teléfono ── */}
                 <div style={{ flex: '0 0 130px', minWidth: 100 }}>
                   <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 3 }}>Teléfono</p>
                   {hasPhone
@@ -200,7 +225,6 @@ export default function AdminProveedores() {
                   }
                 </div>
 
-                {/* ── Costo renovación ── */}
                 <div style={{ flex: '0 0 90px', minWidth: 70 }}>
                   <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 3 }}>Costo</p>
                   {p.renewal_cost
@@ -209,7 +233,6 @@ export default function AdminProveedores() {
                   }
                 </div>
 
-                {/* ── Días / Vence ── */}
                 <div style={{ flex: '0 0 90px', minWidth: 70 }}>
                   <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 3 }}>Vence</p>
                   {days !== null
@@ -223,17 +246,13 @@ export default function AdminProveedores() {
                   }
                 </div>
 
-                {/* ── Acciones ── */}
                 <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
-                  {/* Días */}
                   <Btn onClick={() => { setModal({ type: 'extend', data: p }); setExtendDays(30); setError('') }} title="Ajustar días">
                     <IconEdit size={13} />
                   </Btn>
-                  {/* Editar info */}
                   <Btn onClick={() => openEdit(p)} title="Editar teléfono y costo">
                     <IconUsers size={13} />
                   </Btn>
-                  {/* WhatsApp renovación */}
                   {hasPhone && (
                     <Btn onClick={() => sendRenewalMessage(p)} title="Enviar aviso de renovación"
                       variant={isExpiringSoon ? 'green' : 'ghost'}
@@ -241,7 +260,6 @@ export default function AdminProveedores() {
                       <IconWhatsApp size={13} />
                     </Btn>
                   )}
-                  {/* Activar / Desactivar */}
                   <Btn onClick={() => toggleActive(p)} title={p.is_active ? 'Desactivar' : 'Activar'}
                     color={p.is_active ? 'var(--status-red)' : 'var(--status-green)'}>
                     {p.is_active
@@ -249,7 +267,6 @@ export default function AdminProveedores() {
                       : <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     }
                   </Btn>
-                  {/* Eliminar */}
                   <Btn onClick={() => openDelete(p)} title="Eliminar proveedor" variant="red">
                     <IconTrash size={13} />
                   </Btn>
@@ -260,7 +277,7 @@ export default function AdminProveedores() {
         </div>
       )}
 
-      {/* ── Modal editar teléfono + costo ── */}
+      {/* ── Modal editar ── */}
       <Modal open={modal?.type === 'edit'} onClose={() => setModal(null)} title="Editar información del proveedor">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: 12, fontSize: 13, color: 'var(--ink-muted)' }}>
@@ -376,4 +393,4 @@ export default function AdminProveedores() {
       </Modal>
     </div>
   )
-} 
+}

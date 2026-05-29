@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, Badge, Tabs } from '@/components/ui'
-import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy } from '@/assets/icons'
+import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash } from '@/assets/icons'
 import { formatUSD, formatDateTime, formatDate, getStatusColor, getStatusLabel, getLogoPath } from '@/utils'
 
 function CopyBtn({ value }) {
@@ -36,8 +36,7 @@ export default function ProveedorVentas() {
 
   async function fetchOrders() {
     setLoading(true)
-    setOrders([]) // Limpiar estado viejo para evitar datos mezclados
-    // Primero marcar expiradas en BD, luego cargar datos frescos
+    setOrders([])
     try { await supabase.rpc('mark_expired_orders') } catch (_) {}
 
     const { data: products } = await supabase
@@ -154,31 +153,60 @@ export default function ProveedorVentas() {
       const currentExpiry = renewModal.expires_at ? new Date(renewModal.expires_at) : new Date()
       const base = currentExpiry > new Date() ? currentExpiry : new Date()
       base.setDate(base.getDate() + parseInt(renewDays))
-
       const { error: oErr } = await supabase.from('orders').update({
-        expires_at: base.toISOString(), status: 'activo',
-        updated_at: new Date().toISOString(),
+        expires_at: base.toISOString(), status: 'activo', updated_at: new Date().toISOString(),
       }).eq('id', renewModal.id)
       if (oErr) throw oErr
-
       await supabase.from('balances').update({ amount_usd: renewBalance - cost }).eq('user_id', renewModal.distributor_id)
-
       await supabase.from('transactions').insert({
         user_id: renewModal.distributor_id, type: 'compra', amount_usd: -cost,
         ref_order_id: renewModal.id,
         description: `Renovación: ${renewModal.products?.name} (+${renewDays} días)`,
       })
-
       await supabase.from('notifications').insert({
         user_id: renewModal.distributor_id,
         title: 'Suscripción renovada',
         message: `Tu pedido ${renewModal.order_code} fue renovado por ${renewDays} días. Nueva fecha: ${formatDate(base.toISOString())}`,
         type: 'success', ref_id: renewModal.id,
       })
-
       setRenewModal(null); fetchOrders()
     } catch (e) { setSaveError(e.message) }
     setSaving(false)
+  }
+
+  const [deleteModal, setDeleteModal] = useState(null) // orden a eliminar
+  const [deleting, setDeleting] = useState(false)
+
+  // ── Liberar a stock (devuelve credenciales al inventario, borra la orden) ──
+  async function releaseToStock(order) {
+    setDeleting(true)
+    try {
+      if (order.stock_item_id) {
+        await supabase.from('stock_items')
+          .update({ is_sold: false, sold_at: null, order_id: null })
+          .eq('id', order.stock_item_id)
+      }
+      await supabase.from('support_tickets').delete().eq('order_id', order.id)
+      await supabase.from('orders').delete().eq('id', order.id)
+      setOrders(prev => prev.filter(o => o.id !== order.id))
+      setDeleteModal(null)
+    } catch (e) { alert('Error: ' + e.message) }
+    setDeleting(false)
+  }
+
+  // ── Eliminar permanente (borra orden Y stock item) ──
+  async function deletePermanent(order) {
+    setDeleting(true)
+    try {
+      await supabase.from('support_tickets').delete().eq('order_id', order.id)
+      await supabase.from('orders').delete().eq('id', order.id)
+      if (order.stock_item_id) {
+        await supabase.from('stock_items').delete().eq('id', order.stock_item_id)
+      }
+      setOrders(prev => prev.filter(o => o.id !== order.id))
+      setDeleteModal(null)
+    } catch (e) { alert('Error: ' + e.message) }
+    setDeleting(false)
   }
 
   function exportCSV() {
@@ -256,64 +284,70 @@ export default function ProveedorVentas() {
           </thead>
           <tbody>
             {filtered.map(o => {
-              // Si expires_at ya pasó pero status sigue 'activo', mostrarlo como expirado visualmente
               const isReallyExpired = o.status === 'activo' && o.expires_at && new Date(o.expires_at) < new Date()
               const displayStatus = isReallyExpired ? 'expirado' : o.status
               const expiresSoon = o.status === 'activo' && o.expires_at && !isReallyExpired &&
-                (new Date(o.expires_at) - new Date()) < 3 * 24 * 60 * 60 * 1000 // menos de 3 días
+                (new Date(o.expires_at) - new Date()) < 3 * 24 * 60 * 60 * 1000
+              const canDelete = o.status === 'expirado' || o.status === 'cancelado' || isReallyExpired
               return (
-              <tr key={o.id}>
-                <td><span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink-muted)' }}>#{o.order_code}</span></td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <img src={getLogoPath(o.products?.platforms?.logo_filename)} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
-                    <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.products?.name}</span>
-                  </div>
-                </td>
-                <td style={{ fontSize: 12, color: 'var(--ink-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.user?.full_name || o.user?.email}</td>
-                <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{o.client_name || '—'}</td>
-                <td>
-                  {o.stock_item?.email ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, maxWidth: 170 }}>
-                      <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.stock_item.email}</span>
-                      <CopyBtn value={o.stock_item.email} />
+                <tr key={o.id}>
+                  <td><span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink-muted)' }}>#{o.order_code}</span></td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <img src={getLogoPath(o.products?.platforms?.logo_filename)} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+                      <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.products?.name}</span>
                     </div>
-                  ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
-                </td>
-                <td><span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700 }}>{formatUSD(o.price_paid)}</span></td>
-                <td><Badge color={getStatusColor(displayStatus)} dot>{getStatusLabel(displayStatus)}</Badge></td>
-                <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{formatDateTime(o.created_at)}</td>
-                <td>
-                  {o.expires_at ? (
-                    <span style={{
-                      fontSize: 11, fontWeight: 500,
-                      color: isReallyExpired ? 'var(--status-red)' : expiresSoon ? 'var(--status-yellow)' : 'var(--ink-muted)'
-                    }}>
-                      {formatDate(o.expires_at)}
-                      {expiresSoon && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-yellow)' }}>Vence pronto</span>}
-                      {isReallyExpired && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-red)' }}>Vencida</span>}
-                    </span>
-                  ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => openCredentials(o)} className="btn-secondary"
-                      style={{ fontSize: 11, padding: '5px 10px', gap: 4,
-                        background: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-bg)' : undefined,
-                        borderColor: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-border)' : undefined,
-                        color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined }}>
-                      <IconEdit size={12} />{o.status === 'pendiente_credenciales' ? 'Cargar' : 'Editar'}
-                    </button>
-                    {(o.status === 'activo' || o.status === 'expirado' || isReallyExpired) && (
-                      <button onClick={() => openRenew(o)} className="btn-secondary"
-                        style={{ fontSize: 11, padding: '5px 10px', gap: 4, color: 'var(--status-green)', borderColor: 'var(--status-green-border)', background: 'var(--status-green-bg)' }}>
-                        <IconRefreshCw size={12} />Renovar
+                  </td>
+                  <td style={{ fontSize: 12, color: 'var(--ink-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.user?.full_name || o.user?.email}</td>
+                  <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{o.client_name || '—'}</td>
+                  <td>
+                    {o.stock_item?.email ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, maxWidth: 170 }}>
+                        <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.stock_item.email}</span>
+                        <CopyBtn value={o.stock_item.email} />
+                      </div>
+                    ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
+                  </td>
+                  <td><span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700 }}>{formatUSD(o.price_paid)}</span></td>
+                  <td><Badge color={getStatusColor(displayStatus)} dot>{getStatusLabel(displayStatus)}</Badge></td>
+                  <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{formatDateTime(o.created_at)}</td>
+                  <td>
+                    {o.expires_at ? (
+                      <span style={{ fontSize: 11, fontWeight: 500, color: isReallyExpired ? 'var(--status-red)' : expiresSoon ? 'var(--status-yellow)' : 'var(--ink-muted)' }}>
+                        {formatDate(o.expires_at)}
+                        {expiresSoon && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-yellow)' }}>Vence pronto</span>}
+                        {isReallyExpired && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-red)' }}>Vencida</span>}
+                      </span>
+                    ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => openCredentials(o)} className="btn-secondary"
+                        style={{ fontSize: 11, padding: '5px 10px', gap: 4,
+                          background: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-bg)' : undefined,
+                          borderColor: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-border)' : undefined,
+                          color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined }}>
+                        <IconEdit size={12} />{o.status === 'pendiente_credenciales' ? 'Cargar' : 'Editar'}
                       </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            )})}
+                      {(o.status === 'activo' || o.status === 'expirado' || isReallyExpired) && (
+                        <button onClick={() => openRenew(o)} className="btn-secondary"
+                          style={{ fontSize: 11, padding: '5px 10px', gap: 4, color: 'var(--status-green)', borderColor: 'var(--status-green-border)', background: 'var(--status-green-bg)' }}>
+                          <IconRefreshCw size={12} />Renovar
+                        </button>
+                      )}
+                      {/* ── Eliminar: solo en expirados y cancelados ── */}
+                      {canDelete && (
+                        <button onClick={() => setDeleteModal(o)}
+                          style={{ fontSize: 11, padding: '5px 8px', gap: 4, display: 'flex', alignItems: 'center', borderRadius: 8, background: 'var(--status-red-bg)', border: '1px solid var(--status-red-border)', color: 'var(--status-red)', cursor: 'pointer' }}
+                          title="Eliminar pedido">
+                          <IconTrash size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
             {filtered.length === 0 && (
               <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--ink-faint)', padding: 32 }}>Sin resultados</td></tr>
             )}
@@ -358,8 +392,7 @@ export default function ProveedorVentas() {
       <Modal open={!!renewModal} onClose={() => { setRenewModal(null); setSaveError('') }} title={`Renovar — ${renewModal?.order_code}`} maxWidth="max-w-sm">
         {renewModal && (() => {
           const cost = getRenewalCost(renewModal)
-          const hasDiff = renewModal.products?.is_renewable &&
-            renewModal.products?.renewal_price_usd &&
+          const hasDiff = renewModal.products?.is_renewable && renewModal.products?.renewal_price_usd &&
             parseFloat(renewModal.products.renewal_price_usd) !== parseFloat(renewModal.price_paid)
           const canRenew = renewBalance >= cost
           return (
@@ -373,14 +406,12 @@ export default function ProveedorVentas() {
                   </p>
                 )}
               </div>
-
               {hasDiff && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', borderRadius: 10, fontSize: 12, color: 'var(--status-green)' }}>
                   <IconRefreshCw size={13} />
                   <span>Precio especial de renovación: <strong>{formatUSD(cost)}</strong> (original: {formatUSD(renewModal.price_paid)})</span>
                 </div>
               )}
-
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: canRenew ? 'var(--status-green-bg)' : 'var(--status-red-bg)', border: `1px solid ${canRenew ? 'var(--status-green-border)' : 'var(--status-red-border)'}` }}>
                 <div>
                   <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Saldo del distribuidor</p>
@@ -391,9 +422,7 @@ export default function ProveedorVentas() {
                   <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>{formatUSD(cost)}</p>
                 </div>
               </div>
-
               {!canRenew && <Alert type="error">Saldo insuficiente. Recárgale saldo al distribuidor primero.</Alert>}
-
               <div>
                 <label className="label">Días a agregar</label>
                 <select className="input" value={renewDays} onChange={e => setRenewDays(e.target.value)}>
@@ -411,7 +440,6 @@ export default function ProveedorVentas() {
                   </p>
                 )}
               </div>
-
               {saveError && <Alert type="error">{saveError}</Alert>}
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => { setRenewModal(null); setSaveError('') }} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
@@ -423,6 +451,63 @@ export default function ProveedorVentas() {
             </div>
           )
         })()}
+      </Modal>
+      {/* ── Modal opciones de eliminación ── */}
+      <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title={`Pedido ${deleteModal?.order_code}`} maxWidth="max-w-sm">
+        {deleteModal && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Info del pedido */}
+            <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
+              <p style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{deleteModal.products?.name}</p>
+              <p style={{ color: 'var(--ink-muted)' }}>
+                Cliente: {deleteModal.client_name || '—'}
+                {deleteModal.stock_item?.email && <> · <span style={{ fontFamily: 'DM Mono, monospace' }}>{deleteModal.stock_item.email}</span></>}
+              </p>
+            </div>
+
+            <p style={{ fontSize: 13, color: 'var(--ink-muted)' }}>¿Qué deseas hacer con este pedido?</p>
+
+            {/* Opción 1: devolver a stock */}
+            <button
+              onClick={() => releaseToStock(deleteModal)}
+              disabled={deleting}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px', borderRadius: 12, background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', cursor: 'pointer', textAlign: 'left', fontFamily: 'DM Sans, sans-serif', width: '100%' }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--status-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {deleting ? <Spinner size={15} /> : (
+                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
+                  </svg>
+                )}
+              </div>
+              <div>
+                <p style={{ fontWeight: 700, fontSize: 13, color: 'var(--status-green)', marginBottom: 3 }}>Devolver al stock</p>
+                <p style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5 }}>
+                  Las credenciales quedan disponibles para vender de nuevo. El pedido se elimina pero el stock item se libera.
+                </p>
+              </div>
+            </button>
+
+            {/* Opción 2: eliminar permanente */}
+            <button
+              onClick={() => deletePermanent(deleteModal)}
+              disabled={deleting}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px', borderRadius: 12, background: 'var(--status-red-bg)', border: '1px solid var(--status-red-border)', cursor: 'pointer', textAlign: 'left', fontFamily: 'DM Sans, sans-serif', width: '100%' }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--status-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {deleting ? <Spinner size={15} /> : <IconTrash size={15} style={{ color: '#fff' }} />}
+              </div>
+              <div>
+                <p style={{ fontWeight: 700, fontSize: 13, color: 'var(--status-red)', marginBottom: 3 }}>Eliminar permanentemente</p>
+                <p style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5 }}>
+                  Borra el pedido y las credenciales de la base de datos. No se puede recuperar.
+                </p>
+              </div>
+            </button>
+
+            <button onClick={() => setDeleteModal(null)} className="btn-secondary" style={{ justifyContent: 'center' }}>
+              Cancelar
+            </button>
+          </div>
+        )}
       </Modal>
     </div>
   )
