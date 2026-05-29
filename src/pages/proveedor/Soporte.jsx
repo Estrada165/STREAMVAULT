@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs } from '@/components/ui'
-import { IconHeadphones, IconEdit, IconX, IconCheck, IconAlertCircle, IconRefreshCw, IconDollar, IconTrash } from '@/assets/icons'
+import { IconHeadphones, IconEdit, IconX, IconCheck, IconAlertCircle, IconRefreshCw, IconDollar, IconTrash, IconWhatsApp } from '@/assets/icons'
 import { formatDateTime, getReasonLabel } from '@/utils'
 
 function calcRefund(pricePaid, createdAt, expiresAt) {
@@ -14,6 +14,24 @@ function calcRefund(pricePaid, createdAt, expiresAt) {
   const remainingDays = Math.max(0, totalDays - usedDays)
   const refundAmount = Math.round((pricePaid / totalDays) * remainingDays * 100) / 100
   return { totalDays, usedDays, remainingDays, refundAmount }
+}
+
+// ── Botón WhatsApp reutilizable ──────────────────────────────
+function WaBtn({ phone, message, label = 'WhatsApp', size = 13 }) {
+  if (!phone) return null
+  const clean = phone.replace(/\D/g, '')
+  const url = `https://wa.me/${clean}?text=${encodeURIComponent(message)}`
+  return (
+    <a href={url} target="_blank" rel="noreferrer"
+      style={{
+        fontSize: size, padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 5,
+        borderRadius: 8, background: '#25d366', color: '#fff', fontWeight: 600,
+        fontFamily: 'DM Sans, sans-serif', textDecoration: 'none', whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}>
+      <IconWhatsApp size={13} />{label}
+    </a>
+  )
 }
 
 export default function ProveedorSoporte() {
@@ -150,10 +168,6 @@ export default function ProveedorSoporte() {
     setRenewSaving(false)
   }
 
-  // ── FIXED: executeCancel ──────────────────────────────────────────────────
-  // type = 'platform' → reembolso en saldo de plataforma (amount_usd)
-  // type = 'external'  → reembolso externo — NO toca el saldo
-  // type = 'none'      → sin reembolso — NO toca el saldo
   async function executeCancel(type) {
     setCancelSaving(true)
     setCancelError('')
@@ -161,30 +175,24 @@ export default function ProveedorSoporte() {
       const order = cancelModal.orders
       const refund = calcRefund(order.price_paid, order.created_at, order.expires_at)
 
-      // 1. Cancelar la orden
       const { error: orderErr } = await supabase
         .from('orders').update({ status: 'cancelado', updated_at: new Date().toISOString() }).eq('id', order.id)
       if (orderErr) throw orderErr
 
-      // 2. Liberar el stock item de vuelta a disponible
       if (order.stock_item_id) {
         await supabase.from('stock_items')
           .update({ is_sold: false, sold_at: null, order_id: null })
           .eq('id', order.stock_item_id)
       }
 
-      // 3. Reembolso SOLO si type === 'platform' — los otros dos NO tocan el saldo
       if (type === 'platform' && refund.refundAmount > 0) {
-        // Leer saldo actual con columna correcta: amount_usd
         const { data: balRow } = await supabase
           .from('balances').select('amount_usd').eq('user_id', order.distributor_id).maybeSingle()
         const currentBal = parseFloat(balRow?.amount_usd || 0)
         const newBal = Math.round((currentBal + refund.refundAmount) * 100) / 100
-
         const { error: balErr } = await supabase
           .from('balances').update({ amount_usd: newBal }).eq('user_id', order.distributor_id)
         if (balErr) throw balErr
-
         await supabase.from('transactions').insert({
           user_id: order.distributor_id,
           type: 'devolucion',
@@ -193,23 +201,19 @@ export default function ProveedorSoporte() {
           ref_order_id: order.id,
         })
       }
-      // type === 'external' y type === 'none' no tocan el saldo — intencional
 
-      // 4. Mensaje de notificación según tipo
       const msg = type === 'platform'
         ? `Tu pedido #${order.order_code} fue cancelado. Se te reembolsaron $${refund.refundAmount} en tu saldo de la plataforma.`
         : type === 'external'
         ? `Tu pedido #${order.order_code} fue cancelado. El reembolso de $${refund.refundAmount} se realizará de forma externa.`
         : cancelNote?.trim() || `Tu pedido #${order.order_code} fue cancelado sin reembolso.`
 
-      // 5. Marcar ticket como resuelto
       await supabase.from('support_tickets').update({
         status: 'resuelto',
         provider_response: msg,
         updated_at: new Date().toISOString(),
       }).eq('id', cancelModal.id)
 
-      // 6. Notificar al distribuidor
       await supabase.from('notifications').insert({
         user_id: order.distributor_id,
         title: 'Venta anulada',
@@ -225,7 +229,6 @@ export default function ProveedorSoporte() {
     }
     setCancelSaving(false)
   }
-  // ─────────────────────────────────────────────────────────────────────────
 
   const statusColor = { abierto: 'red', en_revision: 'yellow', resuelto: 'green' }
   const statusLabel = { abierto: 'Abierto', en_revision: 'En revisión', resuelto: 'Resuelto' }
@@ -255,60 +258,77 @@ export default function ProveedorSoporte() {
         <div className="card"><EmptyState icon={IconHeadphones} title="Sin tickets" description="No hay tickets en esta categoría." /></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
-          {tickets.map(t => (
-            <div key={t.id} className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 5, background: t.status === 'abierto' ? 'var(--status-red)' : t.status === 'en_revision' ? 'var(--status-yellow)' : 'var(--status-green)' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                    <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--ink-faint)' }}>#{t.ticket_code}</span>
-                    <Badge color={statusColor[t.status] || 'neutral'}>{statusLabel[t.status] || t.status}</Badge>
+          {tickets.map(t => {
+            const distPhone = t.users?.phone?.replace(/\D/g, '')
+
+            return (
+              <div key={t.id} className="card" style={{ padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 5, background: t.status === 'abierto' ? 'var(--status-red)' : t.status === 'en_revision' ? 'var(--status-yellow)' : 'var(--status-green)' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                      <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--ink-faint)' }}>#{t.ticket_code}</span>
+                      <Badge color={statusColor[t.status] || 'neutral'}>{statusLabel[t.status] || t.status}</Badge>
+                    </div>
+                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 3 }}>{getReasonLabel(t.reason)}</p>
+                    <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Pedido <span style={{ fontFamily: 'DM Mono, monospace' }}>#{t.orders?.order_code}</span> · {t.orders?.products?.name}</p>
+                    <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 3 }}>De: {t.users?.full_name || t.users?.email} · {formatDateTime(t.created_at)}</p>
+                    {t.description && <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--ink-muted)' }}>{t.description}</div>}
+                    {t.provider_response && (
+                      <div style={{ marginTop: 8, background: 'var(--status-green-bg)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--status-green)', border: '1px solid var(--status-green-border)' }}>
+                        <strong>Tu respuesta:</strong> {t.provider_response}
+                      </div>
+                    )}
+                    {t.stock_item && (
+                      <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', lineHeight: 1.8 }}>
+                        {t.stock_item.email && <div>Email: {t.stock_item.email}</div>}
+                        {t.stock_item.password && <div>Pass: {t.stock_item.password}</div>}
+                        {t.stock_item.url && <div>URL: {t.stock_item.url}</div>}
+                        {t.stock_item.profile_name && <div>Perfil: {t.stock_item.profile_name}</div>}
+                      </div>
+                    )}
                   </div>
-                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 3 }}>{getReasonLabel(t.reason)}</p>
-                  <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Pedido <span style={{ fontFamily: 'DM Mono, monospace' }}>#{t.orders?.order_code}</span> · {t.orders?.products?.name}</p>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 3 }}>De: {t.users?.full_name || t.users?.email} · {formatDateTime(t.created_at)}</p>
-                  {t.description && <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--ink-muted)' }}>{t.description}</div>}
-                  {t.provider_response && (
-                    <div style={{ marginTop: 8, background: 'var(--status-green-bg)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--status-green)', border: '1px solid var(--status-green-border)' }}>
-                      <strong>Tu respuesta:</strong> {t.provider_response}
-                    </div>
-                  )}
-                  {t.stock_item && (
-                    <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', lineHeight: 1.8 }}>
-                      {t.stock_item.email && <div>Email: {t.stock_item.email}</div>}
-                      {t.stock_item.password && <div>Pass: {t.stock_item.password}</div>}
-                      {t.stock_item.url && <div>URL: {t.stock_item.url}</div>}
-                      {t.stock_item.profile_name && <div>Perfil: {t.stock_item.profile_name}</div>}
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                  <button onClick={() => openTicket(t)} className="btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>
-                    <IconEdit size={13} />Responder
-                  </button>
-                  <button onClick={() => { setRenewModal(t); setRenewDays(30); setRenewError('') }}
-                    style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-green-bg)', border: '1px solid var(--status-green)', color: 'var(--status-green)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
-                    <IconRefreshCw size={13} />Renovar
-                  </button>
-                  <button onClick={() => { setCancelModal(t); setCancelNote(''); setCancelDone(false); setCancelError('') }}
-                    style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-red-bg)', border: '1px solid var(--status-red)', color: 'var(--status-red)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
-                    <IconX size={13} />Anular venta
-                  </button>
-                  {t.status === 'resuelto' && (
-                    <button onClick={() => deleteTicket(t.id)} disabled={deletingId === t.id}
-                      style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', color: 'var(--ink-faint)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, opacity: deletingId === t.id ? 0.5 : 1 }}>
-                      {deletingId === t.id ? <Spinner size={13} /> : <IconTrash size={13} />}
-                      Eliminar
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                    <button onClick={() => openTicket(t)} className="btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>
+                      <IconEdit size={13} />Responder
                     </button>
-                  )}
+                    {/* ── WA: notificar al distribuidor (en revisión o resuelto) ── */}
+                    {(t.status === 'en_revision' || t.status === 'resuelto') && distPhone && (
+                      <WaBtn
+                        phone={distPhone}
+                        label="Notificar"
+                        message={
+                          t.status === 'resuelto'
+                            ? `Hola ${t.users?.full_name || ''}! 👋\n\nTu ticket *#${t.ticket_code}* ha sido *resuelto* ✅\nPedido: #${t.orders?.order_code} · ${t.orders?.products?.name}\n` +
+                              (t.provider_response ? `\nRespuesta: ${t.provider_response}` : '')
+                            : `Hola ${t.users?.full_name || ''}! 👋\n\nTu ticket *#${t.ticket_code}* está *en revisión* 🔍\nPedido: #${t.orders?.order_code} · ${t.orders?.products?.name}\n\nEstamos trabajando en ello, te avisamos pronto.`
+                        }
+                      />
+                    )}
+                    <button onClick={() => { setRenewModal(t); setRenewDays(30); setRenewError('') }}
+                      style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-green-bg)', border: '1px solid var(--status-green)', color: 'var(--status-green)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                      <IconRefreshCw size={13} />Renovar
+                    </button>
+                    <button onClick={() => { setCancelModal(t); setCancelNote(''); setCancelDone(false); setCancelError('') }}
+                      style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-red-bg)', border: '1px solid var(--status-red)', color: 'var(--status-red)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                      <IconX size={13} />Anular venta
+                    </button>
+                    {t.status === 'resuelto' && (
+                      <button onClick={() => deleteTicket(t.id)} disabled={deletingId === t.id}
+                        style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', color: 'var(--ink-faint)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, opacity: deletingId === t.id ? 0.5 : 1 }}>
+                        {deletingId === t.id ? <Spinner size={13} /> : <IconTrash size={13} />}
+                        Eliminar
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
-      {/* ══ MODAL: RESPONDER TICKET ══ */}
+      {/* ══ MODAL: RESPONDER TICKET — con WA al guardar como resuelto ══ */}
       <Modal open={!!modal} onClose={() => setModal(null)} title={`Ticket #${modal?.ticket_code}`} maxWidth="max-w-lg">
         {modal && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -355,6 +375,19 @@ export default function ProveedorSoporte() {
                 {saving ? <Spinner size={15} /> : 'Guardar y notificar'}
               </button>
             </div>
+            {/* ── WA: notificar al distribuidor que ticket fue resuelto ── */}
+            {newStatus === 'resuelto' && modal.users?.phone && (
+              <WaBtn
+                phone={modal.users.phone}
+                label="Notificar por WhatsApp al resolver"
+                message={
+                  `Hola ${modal.users?.full_name || ''}! 👋\n\n` +
+                  `Tu ticket *#${modal.ticket_code}* ha sido *resuelto* ✅\n` +
+                  `Pedido: #${modal.orders?.order_code} · ${modal.orders?.products?.name}\n` +
+                  (response ? `\nRespuesta: ${response}` : '')
+                }
+              />
+            )}
           </div>
         )}
       </Modal>

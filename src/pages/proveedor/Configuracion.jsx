@@ -11,6 +11,8 @@ const PAYMENT_METHODS = [
   { key: 'binance', label: 'Binance', logo: '/logos/logoBINANCE.webp', placeholder: 'ID de Binance Pay' },
   { key: 'lemon',   label: 'Lemon',   logo: '/logos/logoLEMON.webp',  placeholder: 'Número de teléfono' },
   { key: 'agora',   label: 'Agora',   logo: '/logos/LOGOAGORA.webp',  placeholder: 'Número de teléfono' },
+  { key: 'Prexpe',   label: 'Prexpe',   logo: '/logos/logoPREXPE.png',  placeholder: 'Número de teléfono' },
+
 ]
 
 function MethodLogo({ logo, label, size = 32 }) {

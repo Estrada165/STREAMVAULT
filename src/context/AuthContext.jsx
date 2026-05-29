@@ -22,20 +22,24 @@ export function AuthProvider({ children }) {
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-  if (event === 'SIGNED_OUT') {
-    setSession(null)
-    setProfile(null)
-    setProvider(null)
-    setLoading(false)
-    fetchingRef.current = false
-  }
-  // ← AGREGAR ESTO:
-  if (event === 'SIGNED_IN' && session?.user) {
-    setSession(session)
-    fetchingRef.current = false  // resetear antes de fetchProfile
-    fetchProfile(session.user.id)
-  }
-})
+      // ── Ignorar TOKEN_REFRESHED — evita el parpadeo al cambiar de pestaña ──
+      if (event === 'TOKEN_REFRESHED') return
+
+      if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setProfile(null)
+        setProvider(null)
+        setLoading(false)
+        fetchingRef.current = false
+        return
+      }
+
+      if (event === 'SIGNED_IN' && session?.user) {
+        setSession(session)
+        fetchingRef.current = false
+        fetchProfile(session.user.id)
+      }
+    })
 
     return () => subscription.unsubscribe()
   }, [])
@@ -68,6 +72,7 @@ export function AuthProvider({ children }) {
       console.error('Error fetching profile:', err)
     } finally {
       setLoading(false)
+      fetchingRef.current = false
     }
   }
 
@@ -91,7 +96,6 @@ export function AuthProvider({ children }) {
       provider_id = prov.id
     }
 
-    // Pasar todos los datos en metadata para que el trigger los use como respaldo
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -106,20 +110,18 @@ export function AuthProvider({ children }) {
     })
     if (error) throw error
 
-    // INSERT directo — el trigger ya pudo haberlo creado, ON CONFLICT lo ignora
     const { error: profileError } = await supabase
       .from('users')
       .insert({
         id: data.user.id,
         email,
-        full_name: fullName || null,   // ← estaba faltando esto
+        full_name: fullName || null,
         role,
         provider_id: provider_id || null,
         phone: phone || null,
         is_active: false,
       })
 
-    // Ignorar error si el trigger ya insertó el registro
     if (profileError && !profileError.message.includes('duplicate')) {
       throw profileError
     }
