@@ -322,10 +322,27 @@ export default function ProveedorProductos() {
               <input type="number" step="0.10" min="0" className="input" placeholder="0.00" value={form.price_pen} onChange={e => setForm(f => ({ ...f, price_pen: e.target.value }))} />
               {form.price_pen > 0 && <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 4 }}>= {formatUSD(usdFromForm)} (TC: S/{rate})</p>}
             </div>
-            <div>
-              <label className="label">Duración (días)</label>
-              <input type="number" min="1" className="input" value={form.duration_days} onChange={e => setForm(f => ({ ...f, duration_days: parseInt(e.target.value) }))} />
-            </div>
+<div>
+  <label className="label">Duración (días)</label>
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 4, marginBottom: 8 }}>
+    {[7, 15, 30, 45, 60, 90].map(d => (
+      <button key={d} type="button" onClick={() => setForm(f => ({ ...f, duration_days: d }))}
+        style={{
+          padding: '5px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
+          cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textAlign: 'center',
+          background: form.duration_days === d ? 'var(--ink)' : 'var(--surface-overlay)',
+          color: form.duration_days === d ? 'var(--surface)' : 'var(--ink-muted)',
+          border: `1px solid ${form.duration_days === d ? 'var(--ink)' : 'var(--surface-border)'}`,
+        }}>
+        {d}d
+      </button>
+    ))}
+  </div>
+  <input type="number" min="1" className="input"
+    placeholder="Personalizado"
+    value={form.duration_days}
+    onChange={e => setForm(f => ({ ...f, duration_days: parseInt(e.target.value) || 30 }))} />
+</div>
           </div>
 
           <div>

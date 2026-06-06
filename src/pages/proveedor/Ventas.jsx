@@ -111,8 +111,14 @@ export default function ProveedorVentas() {
           sold_at: new Date().toISOString(), order_id: modal.id,
         }).select().single()
         if (siErr) throw siErr
+
+        // Usar duration_days del producto, fallback 30
+        const { data: prod } = await supabase
+          .from('products').select('duration_days').eq('id', modal.product_id).single()
+        const durationDays = prod?.duration_days || 30
+
         const expiresAt = new Date()
-        expiresAt.setDate(expiresAt.getDate() + 30)
+        expiresAt.setDate(expiresAt.getDate() + durationDays)
         const { error: oErr } = await supabase.from('orders').update({
           stock_item_id: si.id, status: 'activo', expires_at: expiresAt.toISOString(),
         }).eq('id', modal.id)
