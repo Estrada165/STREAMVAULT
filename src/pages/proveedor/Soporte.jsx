@@ -259,7 +259,7 @@ export default function ProveedorSoporte() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
           {tickets.map(t => {
-            const distPhone = t.users?.phone?.replace(/\D/g, '')
+            const distPhone = (t.users?.phone || '').replace(/\D/g, '')
 
             return (
               <div key={t.id} className="card" style={{ padding: '14px 16px' }}>
@@ -299,9 +299,9 @@ export default function ProveedorSoporte() {
                         label="Notificar"
                         message={
                           t.status === 'resuelto'
-                            ? `Hola ${t.users?.full_name || ''}! 👋\n\nTu ticket *#${t.ticket_code}* ha sido *resuelto* ✅\nPedido: #${t.orders?.order_code} · ${t.orders?.products?.name}\n` +
+                            ? `Hola ${t.users?.full_name || ''}!\n\nTu ticket *#${t.ticket_code}* ha sido *resuelto*\nPedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n` +
                               (t.provider_response ? `\nRespuesta: ${t.provider_response}` : '')
-                            : `Hola ${t.users?.full_name || ''}! 👋\n\nTu ticket *#${t.ticket_code}* está *en revisión* 🔍\nPedido: #${t.orders?.order_code} · ${t.orders?.products?.name}\n\nEstamos trabajando en ello, te avisamos pronto.`
+                            : `Hola ${t.users?.full_name || ''}!\n\nTu ticket *#${t.ticket_code}* esta *en revision*\nPedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n\nEstamos trabajando en ello, te avisamos pronto.`
                         }
                       />
                     )}
@@ -381,9 +381,9 @@ export default function ProveedorSoporte() {
                 phone={modal.users.phone}
                 label="Notificar por WhatsApp al resolver"
                 message={
-                  `Hola ${modal.users?.full_name || ''}! 👋\n\n` +
-                  `Tu ticket *#${modal.ticket_code}* ha sido *resuelto* ✅\n` +
-                  `Pedido: #${modal.orders?.order_code} · ${modal.orders?.products?.name}\n` +
+                  `Hola ${modal.users?.full_name || ''}!\n\n` +
+                  `Tu ticket *#${modal.ticket_code}* ha sido *resuelto*\n` +
+                  `Pedido: #${modal.orders?.order_code} - ${modal.orders?.products?.name}\n` +
                   (response ? `\nRespuesta: ${response}` : '')
                 }
               />

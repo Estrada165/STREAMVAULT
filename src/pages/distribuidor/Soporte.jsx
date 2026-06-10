@@ -55,11 +55,11 @@ export default function DistSoporte() {
           {tickets.map(t => {
             // Mensaje WA al proveedor cuando el ticket ya fue resuelto
             const waResolvedMsg =
-              `Hola! Soy *${distName}* 👋\n\n` +
-              `Quería confirmar que recibí la solución de mi ticket *#${t.ticket_code}*.\n` +
-              `Pedido: #${t.orders?.order_code} · ${t.orders?.products?.name}\n` +
-              (t.provider_response ? `\nRespuesta recibida: _"${t.provider_response}"_` : '') +
-              `\n\n¡Gracias por la atención! 🙏`
+              `Hola! Soy *${distName}*\n\n` +
+              `Queria confirmar que recibi la solucion de mi ticket *#${t.ticket_code}*.\n` +
+              `Pedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n` +
+              (t.provider_response ? `\nRespuesta recibida: "${t.provider_response}"` : '') +
+              `\n\nGracias por la atencion!`
 
             return (
               <div key={t.id} className="card p-4">
@@ -100,11 +100,11 @@ export default function DistSoporte() {
                     {/* WA en tickets NO resueltos — para contactar al proveedor */}
                     {t.status !== 'resuelto' && providerPhone && (
                       <a href={`https://wa.me/${providerPhone}?text=${encodeURIComponent(
-                        `Hola! Soy *${distName}* 👋\n\n` +
-                        `Te escribo por mi ticket *#${t.ticket_code}* — *${getReasonLabel(t.reason)}*\n` +
-                        `Pedido: #${t.orders?.order_code} · ${t.orders?.products?.name}\n` +
+                        `Hola! Soy *${distName}*\n\n` +
+                        `Te escribo por mi ticket *#${t.ticket_code}* - *${getReasonLabel(t.reason)}*\n` +
+                        `Pedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n` +
                         (t.description ? `\nDetalle: ${t.description}` : '') +
-                        `\n\n¿Podrías ayudarme? 🙏`
+                        `\n\nPodrias ayudarme?`
                       )}`}
                         target="_blank" rel="noreferrer"
                         style={{

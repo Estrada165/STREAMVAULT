@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, Badge, Tabs } from '@/components/ui'
-import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash } from '@/assets/icons'
+import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash, IconWhatsApp } from '@/assets/icons'
 import { formatUSD, formatDateTime, formatDate, getStatusColor, getStatusLabel, getLogoPath } from '@/utils'
 
 function CopyBtn({ value }) {
@@ -60,7 +60,7 @@ export default function ProveedorVentas() {
 
     const [{ data: prods }, { data: users }, { data: stocks }] = await Promise.all([
       supabase.from('products').select('id, name, is_renewable, renewal_price_usd, platforms(name, logo_filename)').in('id', productIds),
-      supabase.from('users').select('id, full_name, email').in('id', userIds),
+      supabase.from('users').select('id, full_name, email, phone').in('id', userIds),
       stockIds.length ? supabase.from('stock_items').select('*').in('id', stockIds) : { data: [] },
     ])
 
@@ -341,6 +341,28 @@ export default function ProveedorVentas() {
                           <IconRefreshCw size={12} />Renovar
                         </button>
                       )}
+                      {/* ── WA notificar renovación: solo cuando vence en ≤3 días ── */}
+                      {expiresSoon && o.user?.phone && (() => {
+                        const phone = o.user.phone.replace(/\D/g, '')
+                        const daysLeft = Math.ceil((new Date(o.expires_at) - new Date()) / (1000 * 60 * 60 * 24))
+                        const renewCost = o.products?.is_renewable && o.products?.renewal_price_usd
+                          ? formatUSD(o.products.renewal_price_usd)
+                          : formatUSD(o.price_paid)
+                        const msg =
+                          `Hola *${o.client_name || o.user?.full_name || 'cliente'}*!\n\n` +
+                          `Tu acceso a *${o.products?.name}* vence ${daysLeft <= 1 ? 'hoy' : `en *${daysLeft} dias*`}.\n\n` +
+                          (o.stock_item?.email ? `Cuenta: ${o.stock_item.email}\n` : '') +
+                          `Costo de renovacion: *${renewCost}*\n\n` +
+                          `Para renovar, por favor contactanos. Gracias!`
+                        return (
+                          <a href={`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`}
+                            target="_blank" rel="noreferrer"
+                            title="Notificar renovación por WhatsApp"
+                            style={{ fontSize: 11, padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, background: '#25d366', color: '#fff', fontWeight: 600, fontFamily: 'DM Sans, sans-serif', textDecoration: 'none', flexShrink: 0 }}>
+                            <IconWhatsApp size={12} />
+                          </a>
+                        )
+                      })()}
                       {/* ── Eliminar: solo en expirados y cancelados ── */}
                       {canDelete && (
                         <button onClick={() => setDeleteModal(o)}
