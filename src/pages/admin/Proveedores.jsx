@@ -35,7 +35,12 @@ export default function AdminProveedores() {
     await supabase.from('providers').update({ is_active: newActive }).eq('id', provider.id)
     await supabase.from('users').update({ is_active: newActive }).eq('id', provider.user_id)
     if (!newActive) {
+      // Desactivar: apagar todos los distribuidores
       await supabase.from('users').update({ is_active: false }).eq('provider_id', provider.id).eq('role', 'distribuidor')
+    } else {
+      // Reactivar: encender distribuidores que estaban activos antes
+      // Solo los que tienen provider_id correcto — el admin puede activarlos manualmente si quiere seleccionar
+      await supabase.from('users').update({ is_active: true }).eq('provider_id', provider.id).eq('role', 'distribuidor')
     }
     fetchProviders()
   }

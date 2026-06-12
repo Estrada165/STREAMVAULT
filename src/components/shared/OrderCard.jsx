@@ -46,7 +46,7 @@ const STATUS_CONFIG = {
   cancelado: { label: 'Cancelado', color: 'var(--status-red)', bg: 'var(--status-red-bg)', border: 'var(--status-red-border)' },
 }
 
-export default function OrderCard({ order, template, onCredentialsUpdated }) {
+export default function OrderCard({ order, template, exchangeRate = 3.5, onCredentialsUpdated }) {
   const [expanded, setExpanded] = useState(false)
   const [showSupport, setShowSupport] = useState(false)
   const [renewDismissed, setRenewDismissed] = useState(false)
@@ -66,6 +66,8 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
   const sc = STATUS_CONFIG[order.status] || STATUS_CONFIG.expirado
   const showRenewalBanner = !renewDismissed && order.status === 'activo' && days !== null && days <= 7
   const showRenewBtn = order.status === 'activo' || order.status === 'expirado'
+  // Mostrar botón de aviso al cliente cuando vence en ≤7 días y hay número
+  const showNotifyClient = order.status === 'activo' && days !== null && days <= 7 && !!order.client_whatsapp
 
   function handleSendCreds() {
     if (!order.client_whatsapp) return
@@ -88,7 +90,7 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
   function handleNotifyProvider() {
     const provWA = product?.providers?.whatsapp_support
     const phone = provWA ? provWA.replace(/\D/g, '') : ''
-    const msg = `Hola! Realicé el pedido *${order.order_code}* de *${product?.name}*. Por favor confirma cuando las credenciales estén listas. Gracias!`
+    const msg = `Hola! Realice el pedido *${order.order_code}* de *${product?.name}*. Por favor confirma cuando las credenciales esten listas. Gracias!`
     const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`
     window.open(url, '_blank')
   }
@@ -96,10 +98,34 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
   function handleRenewWhatsApp() {
     const provWA = product?.providers?.whatsapp_support
     const phone = provWA ? provWA.replace(/\D/g, '') : ''
-    const daysText = days !== null && days <= 0 ? 'ya venció' : days !== null ? `vence en ${days} día${days === 1 ? '' : 's'}` : 'está por vencer'
-    const msg = `Hola! Mi pedido *${order.order_code}* de *${product?.name}* ${daysText}. ¿Me puedes ayudar con la renovación? Gracias!`
+    const daysText = days !== null && days <= 0 ? 'ya vencio' : days !== null ? `vence en ${days} dia${days === 1 ? '' : 's'}` : 'esta por vencer'
+    const costUsd = product?.renewal_price_usd || order.price_paid
+    const costPen = (parseFloat(costUsd) * exchangeRate).toFixed(2)
+    const msg =
+      `Hola! Mi pedido *${order.order_code}* de *${product?.name}* ${daysText}.\n\n` +
+      (item?.email ? `Cuenta: ${item.email}\n` : '') +
+      (item?.password ? `Contrasena: ${item.password}\n` : '') +
+      `\nCosto de renovacion: *S/ ${costPen}* (~$${parseFloat(costUsd).toFixed(2)})\n\n` +
+      `Me puedes ayudar con la renovacion? Gracias!`
     const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`
     window.open(url, '_blank')
+  }
+
+  // ── NUEVO: Avisar al cliente final que su cuenta vence pronto ──
+  function handleNotifyClient() {
+    if (!order.client_whatsapp) return
+    const daysText = days !== null && days <= 0 ? 'ya vencio' : days !== null ? `vence en ${days} dia${days === 1 ? '' : 's'}` : 'esta por vencer'
+    const costUsd = parseFloat(product?.renewal_price_usd || order.price_paid)
+    const costPen = (costUsd * exchangeRate).toFixed(2)
+    const msg =
+      `Hola *${order.client_name || 'cliente'}*!\n\n` +
+      `Tu acceso a *${product?.name}* ${daysText}.\n\n` +
+      (item?.email ? `Correo: ${item.email}\n` : '') +
+      (item?.password ? `Contrasena: ${item.password}\n` : '') +
+      `\nCosto de renovacion: *S/ ${costPen}*\n\n` +
+      `Para renovar, contactame. Gracias!`
+    const phone = order.client_whatsapp.replace(/\D/g, '')
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
   function openEditClient() {
@@ -147,7 +173,7 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
           <div style={{ background: days <= 0 ? 'var(--status-red-bg)' : 'var(--status-yellow-bg)', borderBottom: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
             <IconAlertCircle size={13} style={{ color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)', flexShrink: 0 }} />
             <p style={{ flex: 1, fontSize: 12, fontWeight: 500, color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)' }}>
-              {days <= 0 ? 'Venció. ¿Deseas renovarlo?' : `Vence en ${days}d. ¿Confirmas renovación?`}
+              {days <= 0 ? 'Vencio. Deseas renovarlo?' : `Vence en ${days}d. Confirmas renovacion?`}
             </p>
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
               <button onClick={e => { e.stopPropagation(); handleRenewWhatsApp() }}
@@ -207,8 +233,19 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
                 <IconSend size={13} />
               </ActionBtn>
             )}
+            {/* ── Avisar al cliente que vence pronto ── */}
+            {showNotifyClient && (
+              <ActionBtn
+                onClick={handleNotifyClient}
+                title="Avisar vencimiento al cliente"
+                bg="var(--status-yellow-bg)"
+                color="var(--status-yellow)"
+                border="1px solid var(--status-yellow-border)">
+                <IconWhatsApp size={13} />
+              </ActionBtn>
+            )}
             {showRenewBtn && (
-              <ActionBtn onClick={handleRenewWhatsApp} title="Solicitar renovación"
+              <ActionBtn onClick={handleRenewWhatsApp} title="Solicitar renovacion al proveedor"
                 bg="var(--status-green-bg)" color="var(--status-green)" border="1px solid var(--status-green)">
                 <IconRefreshCw size={13} />
               </ActionBtn>
@@ -260,7 +297,7 @@ export default function OrderCard({ order, template, onCredentialsUpdated }) {
       <Modal open={showEditClient} onClose={() => setShowEditClient(false)} title="Editar datos del cliente" maxWidth="max-w-sm">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-            Actualiza el nombre o número de tu cliente. El próximo envío de credenciales usará el número actualizado.
+            Actualiza el nombre o numero de tu cliente. El proximo envio de credenciales usara el numero actualizado.
           </p>
           <div>
             <label className="label">Nombre del cliente</label>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useSettings } from '@/hooks/useSettings'
 import { PageHeader, Modal, Alert, Spinner, Badge, Tabs } from '@/components/ui'
 import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash, IconWhatsApp } from '@/assets/icons'
 import { formatUSD, formatDateTime, formatDate, getStatusColor, getStatusLabel, getLogoPath } from '@/utils'
@@ -20,6 +21,7 @@ function CopyBtn({ value }) {
 
 export default function ProveedorVentas() {
   const { provider } = useAuth()
+  const { settings } = useSettings()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -345,19 +347,19 @@ export default function ProveedorVentas() {
                       {expiresSoon && o.user?.phone && (() => {
                         const phone = o.user.phone.replace(/\D/g, '')
                         const daysLeft = Math.ceil((new Date(o.expires_at) - new Date()) / (1000 * 60 * 60 * 24))
-                        const renewCost = o.products?.is_renewable && o.products?.renewal_price_usd
-                          ? formatUSD(o.products.renewal_price_usd)
-                          : formatUSD(o.price_paid)
+                        const costUsd = parseFloat(o.products?.renewal_price_usd || o.price_paid)
+                        const costPen = (costUsd * (parseFloat(settings?.exchange_rate) || 3.5)).toFixed(2)
                         const msg =
                           `Hola *${o.client_name || o.user?.full_name || 'cliente'}*!\n\n` +
                           `Tu acceso a *${o.products?.name}* vence ${daysLeft <= 1 ? 'hoy' : `en *${daysLeft} dias*`}.\n\n` +
-                          (o.stock_item?.email ? `Cuenta: ${o.stock_item.email}\n` : '') +
-                          `Costo de renovacion: *${renewCost}*\n\n` +
-                          `Para renovar, por favor contactanos. Gracias!`
+                          (o.stock_item?.email ? `Correo: ${o.stock_item.email}\n` : '') +
+                          (o.stock_item?.password ? `Contrasena: ${o.stock_item.password}\n` : '') +
+                          `\nCosto de renovacion: *S/ ${costPen}*\n\n` +
+                          `Para renovar, contactanos. Gracias!`
                         return (
                           <a href={`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`}
                             target="_blank" rel="noreferrer"
-                            title="Notificar renovación por WhatsApp"
+                            title="Notificar renovacion por WhatsApp"
                             style={{ fontSize: 11, padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, background: '#25d366', color: '#fff', fontWeight: 600, fontFamily: 'DM Sans, sans-serif', textDecoration: 'none', flexShrink: 0 }}>
                             <IconWhatsApp size={12} />
                           </a>

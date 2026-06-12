@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useBalance } from '@/hooks/useBalance'
+import { useSettings } from '@/hooks/useSettings'
 import { PageHeader, EmptyState, Spinner, Tabs, StatCard } from '@/components/ui'
 import OrderCard from '@/components/shared/OrderCard'
 import { IconBox, IconDollar, IconCheck, IconClock, IconSearch } from '@/assets/icons'
@@ -10,11 +11,14 @@ import { formatUSD } from '@/utils'
 export default function DistDashboard() {
   const { profile } = useAuth()
   const { balance } = useBalance()
+  const { settings } = useSettings()
   const [orders, setOrders] = useState([])
   const [template, setTemplate] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('activo')
   const [search, setSearch] = useState('')
+
+  const exchangeRate = parseFloat(settings?.exchange_rate) || 3.5
 
   useEffect(() => {
     if (profile) { fetchOrders(); fetchTemplate() }
@@ -43,7 +47,7 @@ export default function DistDashboard() {
     const stockIds = [...new Set(ordersData.map(o => o.stock_item_id).filter(Boolean))]
 
     const [{ data: products }, { data: stocks }] = await Promise.all([
-      supabase.from('products').select('id, name, duration_days, delivery_type, provider_id, image_url, platforms(name, logo_filename), providers:provider_id(whatsapp_support)').in('id', productIds),
+      supabase.from('products').select('id, name, duration_days, delivery_type, provider_id, image_url, renewal_price_usd, platforms(name, logo_filename), providers:provider_id(whatsapp_support)').in('id', productIds),
       stockIds.length ? supabase.from('stock_items').select('id, email, password, url, profile_name, profile_pin, activation_code, extra_notes').in('id', stockIds) : { data: [] }
     ])
 
@@ -71,7 +75,6 @@ export default function DistDashboard() {
     expired: orders.filter(o => o.status === 'expirado').length,
   }
 
-  // Filtrar por tab primero, luego por búsqueda
   const byTab = tab === 'all' ? orders : orders.filter(o => o.status === tab)
 
   const filtered = search.trim()
@@ -113,38 +116,23 @@ export default function DistDashboard() {
         />
       </div>
 
-      {/* Buscador */}
       <div style={{ position: 'relative', marginBottom: 14 }}>
         <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
-        <input
-          className="input"
-          style={{ paddingLeft: 36 }}
-          placeholder="Buscar por cliente, plataforma, correo, código..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+        <input className="input" style={{ paddingLeft: 36 }}
+          placeholder="Buscar por cliente, plataforma, correo, codigo..."
+          value={search} onChange={e => setSearch(e.target.value)} />
         {search && (
-          <button
-            onClick={() => setSearch('')}
-            style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 16, lineHeight: 1 }}
-          >
-            ×
+          <button onClick={() => setSearch('')}
+            style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 16, lineHeight: 1 }}>
+            x
           </button>
         )}
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState
-          icon={IconBox}
+        <EmptyState icon={IconBox}
           title={search ? 'Sin resultados' : 'Sin pedidos'}
-          description={
-            search
-              ? `No hay pedidos que coincidan con "${search}".`
-              : tab === 'activo'
-              ? 'No tienes suscripciones activas. Ve a la tienda para comprar.'
-              : 'No hay pedidos en esta categoría.'
-          }
-        />
+          description={search ? `No hay pedidos que coincidan con "${search}".` : tab === 'activo' ? 'No tienes suscripciones activas. Ve a la tienda para comprar.' : 'No hay pedidos en esta categoria.'} />
       ) : (
         <>
           {search && (
@@ -154,7 +142,13 @@ export default function DistDashboard() {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
             {filtered.map(order => (
-              <OrderCard key={order.id} order={order} template={template} onCredentialsUpdated={fetchOrders} />
+              <OrderCard
+                key={order.id}
+                order={order}
+                template={template}
+                exchangeRate={exchangeRate}
+                onCredentialsUpdated={fetchOrders}
+              />
             ))}
           </div>
         </>
