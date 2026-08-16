@@ -542,4 +542,3 @@ export default function ProveedorVentas() {
     </div>
   )
 }
-s
