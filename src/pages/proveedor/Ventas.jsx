@@ -58,13 +58,30 @@ export default function ProveedorVentas() {
 
     const productIds = [...new Set(ordersData.map(o => o.product_id))]
     const userIds = [...new Set(ordersData.map(o => o.distributor_id))]
-    const stockIds = ordersData.map(o => o.stock_item_id).filter(Boolean)
+const stockIds = [...new Set(ordersData.map(o => o.stock_item_id).filter(id => id && typeof id === 'string' && id.length > 0))]
+console.log('Total orders:', ordersData.length)
+console.log('StockIds encontrados:', stockIds.length, stockIds)
 
-    const [{ data: prods }, { data: users }, { data: stocks }] = await Promise.all([
-      supabase.from('products').select('id, name, is_renewable, renewal_price_usd, platforms(name, logo_filename)').in('id', productIds),
-      supabase.from('users').select('id, full_name, email, phone').in('id', userIds),
-      stockIds.length ? supabase.from('stock_items').select('*').in('id', stockIds) : { data: [] },
-    ])
+// Supabase tiene límite de URL — hacer el query en lotes de 100
+let allStocks = []
+if (stockIds.length > 0) {
+  const chunkSize = 100
+  for (let i = 0; i < stockIds.length; i += chunkSize) {
+    const chunk = stockIds.slice(i, i + chunkSize)
+    const { data: chunkData } = await supabase
+      .from('stock_items').select('*').in('id', chunk)
+    if (chunkData) allStocks = allStocks.concat(chunkData)
+  }
+}
+
+const [{ data: prods }, { data: users }] = await Promise.all([
+  supabase.from('products').select('id, name, is_renewable, renewal_price_usd, platforms(name, logo_filename)').in('id', productIds),
+  supabase.from('users').select('id, full_name, email, phone').in('id', userIds),
+])
+
+const stocks = allStocks
+
+console.log('Stocks obtenidos:', stocks?.length, stocks?.[0])
 
     const prodsMap = {}; prods?.forEach(p => { prodsMap[p.id] = p })
     const usersMap = {}; users?.forEach(u => { usersMap[u.id] = u })
