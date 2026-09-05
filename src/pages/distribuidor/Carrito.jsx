@@ -6,12 +6,11 @@ import { useBalance } from '@/hooks/useBalance'
 import { useSettings } from '@/hooks/useSettings'
 import { supabase } from '@/lib/supabase'
 import { PageHeader, Modal, Alert, Spinner } from '@/components/ui'
-import { IconShoppingCart, IconTrash, IconUser, IconDollar, IconCheck } from '@/assets/icons'
+import { IconShoppingCart, IconTrash, IconCheck, IconPlus, IconX } from '@/assets/icons'
 import { formatUSD, formatPEN, getLogoPath } from '@/utils'
 import { addDays } from 'date-fns'
 import PhoneInput from '@/components/shared/PhoneInput'
 
-// Thumbnail del item en carrito: imagen custom > logo plataforma
 function CartItemThumb({ item }) {
   const [imgErr, setImgErr] = useState(false)
   const [logoErr, setLogoErr] = useState(false)
@@ -36,7 +35,7 @@ function CartItemThumb({ item }) {
 }
 
 export default function Carrito() {
-  const { items, removeItem, clearCart, total, count } = useCart()
+  const { items, grouped, updateQuantity, clearCart, total, count } = useCart()
   const { profile } = useAuth()
   const { balance, refetch: refetchBalance } = useBalance()
   const { settings } = useSettings()
@@ -50,16 +49,18 @@ export default function Carrito() {
   const [success, setSuccess] = useState(false)
 
   const insufficient = balance < total
+  const rate = parseFloat(settings?.exchange_rate) || 3.5
 
   async function checkout() {
     if (!clientName.trim()) return setError('El nombre del cliente es requerido')
-    if (!clientPhone.trim()) return setError('El número de WhatsApp es requerido')
+    if (!clientPhone.trim()) return setError('El numero de WhatsApp es requerido')
     if (insufficient) return setError('Saldo insuficiente')
 
     setLoading(true)
     setError('')
 
     try {
+      // Una orden por cada item (permite mismas plataformas con diferentes stock items)
       for (const item of items) {
         let stockItemId = null
 
@@ -68,12 +69,16 @@ export default function Carrito() {
             .from('stock_items').select('id').eq('product_id', item.id).eq('is_sold', false).limit(1)
           if (!stockItems?.length) throw new Error(`Sin stock disponible para: ${item.name}`)
           stockItemId = stockItems[0].id
+
+          await supabase.from('stock_items').update({
+            is_sold: true, sold_at: new Date().toISOString()
+          }).eq('id', stockItemId)
         }
 
         const expiresAt = addDays(new Date(), item.duration_days).toISOString()
         const status = item.delivery_mode === 'stock' ? 'activo' : 'pendiente_credenciales'
 
-        const { data: order } = await supabase.from('orders').insert({
+        const { data: order, error: orderErr } = await supabase.from('orders').insert({
           distributor_id: profile.id,
           product_id: item.id,
           stock_item_id: stockItemId,
@@ -84,8 +89,10 @@ export default function Carrito() {
           expires_at: expiresAt,
         }).select().single()
 
+        if (orderErr) throw orderErr
+
         if (stockItemId) {
-          await supabase.from('stock_items').update({ is_sold: true, sold_at: new Date().toISOString(), order_id: order.id }).eq('id', stockItemId)
+          await supabase.from('stock_items').update({ order_id: order.id }).eq('id', stockItemId)
         }
 
         await supabase.from('transactions').insert({
@@ -94,8 +101,11 @@ export default function Carrito() {
         })
       }
 
+      // Descontar saldo una sola vez
       const { data: bal } = await supabase.from('balances').select('amount_usd').eq('user_id', profile.id).single()
-      await supabase.from('balances').update({ amount_usd: parseFloat(bal.amount_usd) - total }).eq('user_id', profile.id)
+      await supabase.from('balances').update({
+        amount_usd: parseFloat((parseFloat(bal.amount_usd) - total).toFixed(2))
+      }).eq('user_id', profile.id)
 
       clearCart()
       refetchBalance()
@@ -113,7 +123,9 @@ export default function Carrito() {
             <IconCheck size={32} className="text-[var(--status-green)]" />
           </div>
           <h2 className="font-display font-bold text-xl text-[var(--ink)] mb-2">Compra exitosa</h2>
-          <p className="text-sm text-[var(--ink-muted)] mb-6">Tus pedidos están listos. Revisa tu panel para ver las credenciales.</p>
+          <p className="text-sm text-[var(--ink-muted)] mb-6">
+            {count > 1 ? `${items.length} pedidos creados.` : 'Tu pedido esta listo.'} Revisa tu panel para ver las credenciales.
+          </p>
           <button onClick={() => navigate('/dashboard')} className="btn-primary w-full justify-center">Ver mis pedidos</button>
         </div>
       </div>
@@ -124,32 +136,62 @@ export default function Carrito() {
     <div>
       <PageHeader title="Carrito" subtitle={`${count} producto${count !== 1 ? 's' : ''}`} />
 
-      {items.length === 0 ? (
+      {grouped.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="w-16 h-16 rounded-2xl bg-[var(--surface-overlay)] flex items-center justify-center mb-4 text-[var(--ink-faint)]">
             <IconShoppingCart size={30} />
           </div>
-          <h3 className="font-display font-semibold text-[var(--ink)] mb-1">Tu carrito está vacío</h3>
+          <h3 className="font-display font-semibold text-[var(--ink)] mb-1">Tu carrito esta vacio</h3>
           <p className="text-sm text-[var(--ink-muted)] mb-5">Agrega productos desde la tienda</p>
           <button onClick={() => navigate('/tienda')} className="btn-primary">Ir a la tienda</button>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* ITEMS */}
+          {/* ITEMS AGRUPADOS */}
           <div className="lg:col-span-2 space-y-3">
-            {items.map(item => (
+            {grouped.map(item => (
               <div key={item.id} className="card p-4 flex items-center gap-4">
                 <CartItemThumb item={item} />
+
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm truncate">{item.name}</p>
-                  <p className="text-xs text-[var(--ink-faint)]">{item.platforms?.name} · {item.duration_days} días</p>
+                  <p className="text-xs text-[var(--ink-faint)]">
+                    {item.platforms?.name} · {item.duration_days} dias
+                  </p>
+                  {item.quantity > 1 && (
+                    <p className="text-xs text-[var(--ink-faint)] mt-0.5">
+                      {item.quantity} x {formatUSD(item.price_usd)} c/u
+                    </p>
+                  )}
                 </div>
-                <div className="text-right">
-                  <p className="font-display font-bold">{formatUSD(item.price_usd)}</p>
-                  <p className="text-xs text-[var(--ink-faint)]">≈ {formatPEN(item.price_usd * settings.exchange_rate)}</p>
+
+                {/* Selector de cantidad */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface-overlay)', borderRadius: 10, padding: '4px 6px', border: '1px solid var(--surface-border)' }}>
+                  <button
+                    onClick={() => updateQuantity(item.id, -1)}
+                    style={{ width: 26, height: 26, borderRadius: 7, border: 'none', background: 'var(--surface-raised)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)', fontWeight: 700, fontSize: 16 }}>
+                    −
+                  </button>
+                  <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600, fontSize: 14, color: 'var(--ink)', minWidth: 20, textAlign: 'center' }}>
+                    {item.quantity}
+                  </span>
+                  <button
+                    onClick={() => updateQuantity(item.id, 1)}
+                    style={{ width: 26, height: 26, borderRadius: 7, border: 'none', background: 'var(--surface-raised)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)', fontWeight: 700, fontSize: 16 }}>
+                    +
+                  </button>
                 </div>
-                <button onClick={() => removeItem(item.id)} className="btn-ghost p-2 text-[var(--status-red)]">
+
+                <div className="text-right" style={{ minWidth: 70 }}>
+                  <p className="font-display font-bold">{formatUSD(item.subtotal)}</p>
+                  <p className="text-xs text-[var(--ink-faint)]">≈ {formatPEN(item.subtotal * rate)}</p>
+                </div>
+
+                <button onClick={() => {
+                  // Quitar todas las instancias de este producto
+                  for (let i = 0; i < item.quantity; i++) updateQuantity(item.id, -1)
+                }} className="btn-ghost p-2 text-[var(--status-red)]">
                   <IconTrash size={15} />
                 </button>
               </div>
@@ -160,16 +202,51 @@ export default function Carrito() {
           <div className="space-y-4">
             <div className="card p-5 space-y-4">
               <h2 className="font-display font-semibold">Resumen</h2>
-              <div className="flex justify-between text-sm"><span>Subtotal</span><span>{formatUSD(total)}</span></div>
-              <div className="flex justify-between text-sm"><span>En soles</span><span>≈ {formatPEN(total * settings.exchange_rate)}</span></div>
+
+              {grouped.map(item => (
+                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--ink-muted)' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                    {item.quantity > 1 ? `${item.quantity}x ` : ''}{item.name}
+                  </span>
+                  <span style={{ flexShrink: 0, marginLeft: 8 }}>{formatUSD(item.subtotal)}</span>
+                </div>
+              ))}
+
               <div className="divider" />
-              <div className="flex justify-between font-bold text-lg"><span>Total</span><span>{formatUSD(total)}</span></div>
-              <div className={`p-3 rounded-xl ${insufficient ? 'bg-[var(--status-red-bg)]' : 'bg-[var(--status-green-bg)]'}`}>
-                <div className="flex justify-between text-sm"><span>Tu saldo</span><span>{formatUSD(balance)}</span></div>
+
+              <div className="flex justify-between text-sm">
+                <span>En soles</span>
+                <span>≈ {formatPEN(total * rate)}</span>
               </div>
-              {insufficient && <Alert type="error">Saldo insuficiente</Alert>}
-              <button onClick={() => { setModal(true); setError('') }} disabled={insufficient} className="btn-primary w-full">
-                Confirmar compra
+              <div className="flex justify-between font-bold text-lg">
+                <span>Total</span>
+                <span>{formatUSD(total)}</span>
+              </div>
+
+              <div style={{ padding: '10px 12px', borderRadius: 12, background: insufficient ? 'var(--status-red-bg)' : 'var(--status-green-bg)', border: `1px solid ${insufficient ? 'var(--status-red-border)' : 'var(--status-green-border)'}` }}>
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: insufficient ? 'var(--status-red)' : 'var(--status-green)' }}>Tu saldo</span>
+                  <span style={{ fontWeight: 700, color: insufficient ? 'var(--status-red)' : 'var(--status-green)' }}>{formatUSD(balance)}</span>
+                </div>
+                {insufficient && (
+                  <p style={{ fontSize: 11, color: 'var(--status-red)', marginTop: 4 }}>
+                    Te faltan {formatUSD(total - balance)} para completar esta compra
+                  </p>
+                )}
+              </div>
+
+              {insufficient && <Alert type="error">Saldo insuficiente para completar la compra</Alert>}
+
+              <button
+                onClick={() => { setModal(true); setError('') }}
+                disabled={insufficient || grouped.length === 0}
+                className="btn-primary w-full"
+                style={{ justifyContent: 'center' }}>
+                Confirmar compra · {formatUSD(total)}
+              </button>
+
+              <button onClick={() => navigate('/tienda')} className="btn-secondary w-full" style={{ justifyContent: 'center', fontSize: 13 }}>
+                Seguir comprando
               </button>
             </div>
           </div>
@@ -178,16 +255,19 @@ export default function Carrito() {
 
       <Modal open={modal} onClose={() => setModal(false)} title="Datos del cliente">
         <div className="space-y-4">
+          <p style={{ fontSize: 13, color: 'var(--ink-muted)', marginBottom: 4 }}>
+            Estos datos se usaran para todos los pedidos de esta compra.
+          </p>
           <div>
             <label className="label">Nombre del cliente</label>
-            <input className="input" placeholder="Nombre completo" value={clientName} onChange={e => setClientName(e.target.value)} />
+            <input className="input" placeholder="Nombre completo" value={clientName} onChange={e => setClientName(e.target.value)} autoFocus />
           </div>
           <PhoneInput label="WhatsApp del cliente" value={clientPhone} onChange={setClientPhone} />
           {error && <Alert type="error">{error}</Alert>}
           <div className="flex gap-2">
-            <button onClick={() => setModal(false)} className="btn-secondary flex-1">Cancelar</button>
-            <button onClick={checkout} disabled={loading} className="btn-primary flex-1">
-              {loading ? <Spinner size={16} /> : 'Pagar ahora'}
+            <button onClick={() => setModal(false)} className="btn-secondary flex-1" style={{ justifyContent: 'center' }}>Cancelar</button>
+            <button onClick={checkout} disabled={loading} className="btn-primary flex-1" style={{ justifyContent: 'center' }}>
+              {loading ? <Spinner size={16} /> : `Pagar ${formatUSD(total)}`}
             </button>
           </div>
         </div>
