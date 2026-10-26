@@ -46,9 +46,21 @@ export default function DistDashboard() {
     const productIds = [...new Set(ordersData.map(o => o.product_id).filter(Boolean))]
     const stockIds = [...new Set(ordersData.map(o => o.stock_item_id).filter(Boolean))]
 
+    // En lotes de 100: con cientos de IDs la URL supera el límite y Supabase responde 400
+    const fetchStocks = async () => {
+      let all = []
+      for (let i = 0; i < stockIds.length; i += 100) {
+        const { data } = await supabase.from('stock_items')
+          .select('id, email, password, url, profile_name, profile_pin, activation_code, extra_notes')
+          .in('id', stockIds.slice(i, i + 100))
+        if (data) all = all.concat(data)
+      }
+      return { data: all }
+    }
+
     const [{ data: products }, { data: stocks }] = await Promise.all([
       supabase.from('products').select('id, name, duration_days, delivery_type, provider_id, image_url, renewal_price_usd, platforms(name, logo_filename), providers:provider_id(whatsapp_support)').in('id', productIds),
-      stockIds.length ? supabase.from('stock_items').select('id, email, password, url, profile_name, profile_pin, activation_code, extra_notes').in('id', stockIds) : { data: [] }
+      fetchStocks(),
     ])
 
     const productsMap = {}

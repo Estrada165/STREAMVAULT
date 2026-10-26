@@ -108,9 +108,10 @@ export default function ProveedorProductos() {
     setProducts(data || [])
     if (data?.length) {
       const ids = data.map(p => p.id)
-      const { data: stock } = await supabase.from('stock_items').select('product_id').in('product_id', ids).eq('is_sold', false)
+      // Solo cantidades: el stock sin vender ya no es legible desde el navegador
+      const { data: stock } = await supabase.rpc('get_stock_counts', { p_product_ids: ids })
       const counts = {}
-      stock?.forEach(s => { counts[s.product_id] = (counts[s.product_id] || 0) + 1 })
+      stock?.forEach(s => { counts[s.product_id] = Number(s.available) || 0 })
       setStockCounts(counts)
     }
     setLoading(false)

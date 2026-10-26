@@ -86,11 +86,9 @@ export function AuthProvider({ children }) {
     let provider_id = null
 
     if (role === 'distribuidor' && providerCode) {
-      const { data: prov } = await supabase
-        .from('providers')
-        .select('id, is_active')
-        .eq('slug', providerCode.toLowerCase())
-        .single()
+      const { data: provRows } = await supabase
+        .rpc('lookup_provider_code', { p_code: providerCode.trim() })
+      const prov = provRows?.[0]
       if (!prov) throw new Error('Código de proveedor inválido')
       if (!prov.is_active) throw new Error('Este proveedor no está activo actualmente')
       provider_id = prov.id
@@ -110,7 +108,9 @@ export function AuthProvider({ children }) {
     })
     if (error) throw error
 
-    const { error: profileError } = await supabase
+    // El perfil lo crea el trigger handle_new_user en la base de datos.
+    // Este insert es solo un respaldo; si falla (duplicado o permisos) no importa.
+    if (data?.user?.id) await supabase
       .from('users')
       .insert({
         id: data.user.id,
@@ -122,9 +122,6 @@ export function AuthProvider({ children }) {
         is_active: false,
       })
 
-    if (profileError && !profileError.message.includes('duplicate')) {
-      throw profileError
-    }
 
     return data
   }

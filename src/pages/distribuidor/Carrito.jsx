@@ -8,7 +8,6 @@ import { supabase } from '@/lib/supabase'
 import { PageHeader, Modal, Alert, Spinner } from '@/components/ui'
 import { IconShoppingCart, IconTrash, IconCheck, IconPlus, IconX } from '@/assets/icons'
 import { formatUSD, formatPEN, getLogoPath } from '@/utils'
-import { addDays } from 'date-fns'
 import PhoneInput from '@/components/shared/PhoneInput'
 
 function CartItemThumb({ item }) {
@@ -47,6 +46,7 @@ export default function Carrito() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [createdCount, setCreatedCount] = useState(0)
 
   const insufficient = balance < total
   const rate = parseFloat(settings?.exchange_rate) || 3.5
@@ -60,53 +60,17 @@ export default function Carrito() {
     setError('')
 
     try {
-      // Una orden por cada item (permite mismas plataformas con diferentes stock items)
-      for (const item of items) {
-        let stockItemId = null
+      // Compra atómica en la base de datos: precio real, stock bloqueado y saldo
+      // descontado en una sola transacción (si algo falla, no se cobra nada).
+      const payload = grouped.map(g => ({ product_id: g.id, quantity: g.quantity }))
+      const { data, error: rpcErr } = await supabase.rpc('checkout', {
+        p_items: payload,
+        p_client_name: clientName.trim(),
+        p_client_whatsapp: clientPhone.trim(),
+      })
+      if (rpcErr) throw rpcErr
 
-        if (item.delivery_mode === 'stock') {
-          const { data: stockItems } = await supabase
-            .from('stock_items').select('id').eq('product_id', item.id).eq('is_sold', false).limit(1)
-          if (!stockItems?.length) throw new Error(`Sin stock disponible para: ${item.name}`)
-          stockItemId = stockItems[0].id
-
-          await supabase.from('stock_items').update({
-            is_sold: true, sold_at: new Date().toISOString()
-          }).eq('id', stockItemId)
-        }
-
-        const expiresAt = addDays(new Date(), item.duration_days).toISOString()
-        const status = item.delivery_mode === 'stock' ? 'activo' : 'pendiente_credenciales'
-
-        const { data: order, error: orderErr } = await supabase.from('orders').insert({
-          distributor_id: profile.id,
-          product_id: item.id,
-          stock_item_id: stockItemId,
-          client_name: clientName.trim(),
-          client_whatsapp: clientPhone.trim(),
-          price_paid: item.price_usd,
-          status,
-          expires_at: expiresAt,
-        }).select().single()
-
-        if (orderErr) throw orderErr
-
-        if (stockItemId) {
-          await supabase.from('stock_items').update({ order_id: order.id }).eq('id', stockItemId)
-        }
-
-        await supabase.from('transactions').insert({
-          user_id: profile.id, type: 'compra', amount_usd: -item.price_usd,
-          ref_order_id: order.id, description: `Compra: ${item.name}`,
-        })
-      }
-
-      // Descontar saldo una sola vez
-      const { data: bal } = await supabase.from('balances').select('amount_usd').eq('user_id', profile.id).single()
-      await supabase.from('balances').update({
-        amount_usd: parseFloat((parseFloat(bal.amount_usd) - total).toFixed(2))
-      }).eq('user_id', profile.id)
-
+      setCreatedCount(data?.orders?.length || count)
       clearCart()
       refetchBalance()
       setSuccess(true)
@@ -124,7 +88,7 @@ export default function Carrito() {
           </div>
           <h2 className="font-display font-bold text-xl text-[var(--ink)] mb-2">Compra exitosa</h2>
           <p className="text-sm text-[var(--ink-muted)] mb-6">
-            {count > 1 ? `${items.length} pedidos creados.` : 'Tu pedido esta listo.'} Revisa tu panel para ver las credenciales.
+            {createdCount > 1 ? `${createdCount} pedidos creados.` : 'Tu pedido esta listo.'} Revisa tu panel para ver las credenciales.
           </p>
           <button onClick={() => navigate('/dashboard')} className="btn-primary w-full justify-center">Ver mis pedidos</button>
         </div>

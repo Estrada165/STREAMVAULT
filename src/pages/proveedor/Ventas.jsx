@@ -37,8 +37,7 @@ export default function ProveedorVentas() {
   useEffect(() => { if (provider) fetchOrders() }, [provider])
 
   async function fetchOrders() {
-    setLoading(true)
-    setOrders([])
+    // Sin vaciar la lista: los datos se actualizan en su lugar (sin parpadeo)
     try { await supabase.rpc('mark_expired_orders') } catch (_) {}
 
     const { data: products } = await supabase
@@ -59,8 +58,6 @@ export default function ProveedorVentas() {
     const productIds = [...new Set(ordersData.map(o => o.product_id))]
     const userIds = [...new Set(ordersData.map(o => o.distributor_id))]
 const stockIds = [...new Set(ordersData.map(o => o.stock_item_id).filter(id => id && typeof id === 'string' && id.length > 0))]
-console.log('Total orders:', ordersData.length)
-console.log('StockIds encontrados:', stockIds.length, stockIds)
 
 // Supabase tiene límite de URL — hacer el query en lotes de 100
 let allStocks = []
@@ -81,7 +78,6 @@ const [{ data: prods }, { data: users }] = await Promise.all([
 
 const stocks = allStocks
 
-console.log('Stocks obtenidos:', stocks?.length, stocks?.[0])
 
     const prodsMap = {}; prods?.forEach(p => { prodsMap[p.id] = p })
     const usersMap = {}; users?.forEach(u => { usersMap[u.id] = u })
