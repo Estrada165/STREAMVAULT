@@ -1,78 +1,82 @@
 import { useState } from 'react'
-import { getLogoPath, formatUSD, getDeliveryTypeLabel } from '@/utils'
-import { Modal } from '@/components/ui'
-import { IconFileText, IconShield, IconPackage, IconShoppingCart, IconInfo, IconRefreshCw } from '@/assets/icons'
+import { formatUSD, getDeliveryTypeLabel } from '@/utils'
+import { getPlatformColor, PlatformLogo } from '@/utils/platform'
+import { Modal, Tabs } from '@/components/ui'
+import { IconFileText, IconShield, IconPackage, IconShoppingCart, IconRefreshCw, IconCheck, IconClock } from '@/assets/icons'
 
-function getPlatformColor(name = '') {
-  const n = name.toLowerCase()
-  if (n.includes('netflix')) return '#e50914'
-  if (n.includes('disney')) return '#006e99'
-  if (n.includes('hbo') || n.includes('max')) return '#5822b4'
-  if (n.includes('amazon') || n.includes('prime')) return '#ff9900'
-  if (n.includes('spotify')) return '#1db954'
-  if (n.includes('youtube')) return '#ff0000'
-  if (n.includes('crunchyroll')) return '#f47521'
-  if (n.includes('apple')) return '#555555'
-  if (n.includes('paramount')) return '#0064ff'
-  if (n.includes('movistar')) return '#019df4'
-  if (n.includes('claro')) return '#da291c'
-  if (n.includes('directv')) return '#00a8e0'
-  if (n.includes('deezer')) return '#a238ff'
-  if (n.includes('vix')) return '#f5a623'
-  if (n.includes('plex')) return '#e5a00d'
-  if (n.includes('windows')) return '#0078d4'
-  if (n.includes('autodesk')) return '#e84b35'
-  if (n.includes('canva')) return '#00c4cc'
-  if (n.includes('adobe')) return '#ff0000'
-  if (n.includes('office') || n.includes('microsoft')) return '#d83b01'
-  return '#6b7280'
+// ---------- Estilo de la tarjeta (lo elige el proveedor en Productos) ----------
+export const CARD_FIT = {
+  cover: { label: 'Llenar el marco', hint: 'Ocupa toda la portada' },
+  contain: { label: 'Imagen completa', hint: 'Se ve entera, sin recortes' },
+}
+export const CARD_POS = { top: 'Arriba', center: 'Centro', bottom: 'Abajo' }
+export const CARD_COLOR_USES = ['Borde y brillo de la tarjeta', 'Fondo de la portada (imagen completa o sin imagen)', 'Punto de la etiqueta de plataforma']
+
+export function normalizeCardStyle(raw) {
+  const s = raw && typeof raw === 'object' ? raw : {}
+  return {
+    fit: s.fit === 'contain' ? 'contain' : 'cover',
+    pos: ['top', 'bottom'].includes(s.pos) ? s.pos : 'center',
+    color: /^#[0-9a-f]{6}$/i.test(s.color || '') ? s.color : null,
+  }
 }
 
-function CardHeader({ imageUrl, logoFilename, platformName, accentColor, isCustomPlatform }) {
-  const [imgErr, setImgErr] = useState(false)
-  const [logoErr, setLogoErr] = useState(false)
-  const logoPath = isCustomPlatform ? null : getLogoPath(logoFilename)
-  const showImage = imageUrl && !imgErr
+/**
+ * Portada del producto.
+ * - "Llenar el marco": la imagen cubre toda la portada; "pos" decide qué parte se conserva.
+ * - "Imagen completa": la imagen se ve entera, con esquinas redondeadas, sobre el color
+ *   de la tarjeta o (sin color) sobre un difuminado de la misma imagen.
+ */
+export function ProductCover({ imageUrl, platformName, logoFilename, tint, style: rawStyle, className = '' }) {
+  const [err, setErr] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const st = normalizeCardStyle(rawStyle)
+  const show = imageUrl && !err
+  const base = st.color || tint
+  const contain = st.fit === 'contain'
+
+  let background
+  if (!show) background = `radial-gradient(120% 90% at 50% 0%, ${base}38 0%, ${base}12 45%, transparent 75%), var(--surface-overlay)`
+  else if (contain && st.color) background = `radial-gradient(120% 120% at 50% 0%, ${st.color}55, ${st.color}1f 60%), var(--surface-overlay)`
 
   return (
-    <div style={{ width: '100%', aspectRatio: '16 / 9', position: 'relative', overflow: 'hidden', flexShrink: 0, background: showImage ? `${accentColor}18` : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)` }}>
-      {showImage ? (
+    <div className={`cover ${show ? (contain ? 'is-contain' : 'is-fill') : ''} ${className}`} style={background ? { background } : undefined}>
+      {show ? (
         <>
-          <img src={imageUrl} alt={platformName} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} onError={() => setImgErr(true)} />
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%', background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)', borderRadius: 20, padding: '3px 8px 3px 4px' }}>
-            <div style={{ width: 18, height: 18, borderRadius: '50%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${accentColor}40`, flexShrink: 0 }}>
-              {!isCustomPlatform && logoPath && !logoErr
-                ? <img src={logoPath} alt={platformName} style={{ width: 14, height: 14, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
-                : <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(platformName || '?')[0].toUpperCase()}</span>}
+          {contain && !st.color && <img src={imageUrl} alt="" aria-hidden="true" className="cover-bg" />}
+          {!loaded && <div className="absolute inset-0 sk !rounded-none" />}
+          {contain ? (
+            <div className="cover-frame">
+              <img src={imageUrl} alt={platformName} loading="lazy" className="cover-img" onLoad={() => setLoaded(true)} onError={() => setErr(true)} />
             </div>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)' }}>{platformName}</span>
-          </div>
+          ) : (
+            <img src={imageUrl} alt={platformName} loading="lazy" className="cover-img" style={{ objectPosition: `center ${st.pos}` }} onLoad={() => setLoaded(true)} onError={() => setErr(true)} />
+          )}
         </>
       ) : (
-        <>
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ position: 'absolute', width: '60%', height: '60%', borderRadius: '50%', background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)` }} />
-            <div style={{ width: 56, height: 56, borderRadius: 16, background: `${accentColor}20`, border: `1.5px solid ${accentColor}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
-              {!isCustomPlatform && logoPath && !logoErr
-                ? <img src={logoPath} alt={platformName} style={{ width: 42, height: 42, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
-                : <span style={{ fontSize: 22, fontWeight: 800, color: accentColor }}>{(platformName || '?')[0].toUpperCase()}</span>}
-            </div>
+        <div className="absolute inset-0 grid place-items-center">
+          <div className="transition-transform duration-500 group-hover:scale-110 group-hover:-translate-y-0.5">
+            <PlatformLogo name={platformName} filename={logoFilename} size={68} />
           </div>
-          <p style={{ position: 'absolute', bottom: 8, left: 10, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: `${accentColor}cc` }}>{platformName}</p>
-        </>
+        </div>
       )}
     </div>
   )
 }
 
-export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockCount = 0 }) {
-  const [modal, setModal] = useState(null)
+const DETAIL_TABS = [
+  { key: 'includes', field: 'what_includes', label: '¿Qué incluye?', short: 'Incluye', icon: IconPackage },
+  { key: 'terms', field: 'terms', label: 'Términos y condiciones', short: 'Términos', icon: IconFileText },
+  { key: 'warranty', field: 'warranty', label: 'Garantía', short: 'Garantía', icon: IconShield },
+]
 
-  const isCustomPlatform = !!product.custom_platform_name
+export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockCount = 0 }) {
+  const [detail, setDetail] = useState(null) // pestaña abierta en el detalle
+  const [added, setAdded] = useState(false)
+
   const platformName = product.custom_platform_name || product.platforms?.name || ''
-  const accentColor = getPlatformColor(platformName)
-  const imageUrl = product.image_url || null
+  const tint = getPlatformColor(platformName)
+  const cardStyle = normalizeCardStyle(product.card_style)
 
   const deliveryTypeLabel = (product.delivery_type === 'otro' && product.custom_delivery_type)
     ? product.custom_delivery_type
@@ -90,92 +94,96 @@ export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockC
   const isRenewable = product.is_renewable
   const renewalPrice = product.renewal_price_usd
   const showRenewalDiff = isRenewable && renewalPrice && parseFloat(renewalPrice) !== parseFloat(product.price_usd)
+  const tabs = DETAIL_TABS.filter(t => product[t.field])
+
+  function handleBuy() {
+    if (!canBuy || !onBuy) return
+    onBuy(product)
+    setAdded(true)
+    setTimeout(() => setAdded(false), 1300)
+  }
+
+  const durationLabel = product.duration_days >= 360 ? `${Math.round(product.duration_days / 365)} año` : product.duration_days % 30 === 0 && product.duration_days > 30 ? `${product.duration_days / 30} meses` : `${product.duration_days} días`
 
   return (
     <>
-      <div style={{ background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', borderRadius: 18, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', transition: 'box-shadow 0.25s, transform 0.2s', boxShadow: `inset 3px 0 0 ${accentColor}` }}
-        onMouseEnter={e => { e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}, 0 8px 32px rgba(0,0,0,0.18)`; e.currentTarget.style.transform = 'translateY(-3px)' }}
-        onMouseLeave={e => { e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}`; e.currentTarget.style.transform = '' }}
+      <article
+        className={`product-card group h-full flex flex-col ${cardStyle.color ? 'has-color' : ''} ${isDisabled ? 'opacity-70' : ''}`}
+        style={cardStyle.color ? { '--card-c': cardStyle.color } : undefined}
       >
-        <CardHeader imageUrl={imageUrl} logoFilename={product.platforms?.logo_filename} platformName={platformName} accentColor={accentColor} isCustomPlatform={isCustomPlatform} />
-
-        <div style={{ padding: '10px 14px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
-          <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13.5, color: 'var(--ink)', lineHeight: 1.35, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginBottom: 8 }}>
-            {product.name}
-          </p>
-
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 10 }}>
-            <span className="badge badge-neutral" style={{ fontSize: 10 }}>{deliveryTypeLabel}</span>
-            <span className="badge badge-neutral" style={{ fontSize: 10 }}>{product.duration_days}d</span>
-            {inStock && <span className="badge badge-green" style={{ fontSize: 10 }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />{stockCount}</span>}
-            {isPedido && pedidoAvailable && (
-              <span className="badge badge-yellow" style={{ fontSize: 10 }}>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />
-                {product.stock_qty > 0 ? `Pedido: ${product.stock_qty}` : 'A pedido'}
-              </span>
-            )}
-            {(outOfStock || pedidoUnavailable) && <span className="badge badge-neutral" style={{ fontSize: 10, opacity: 0.6 }}>Agotado</span>}
-            {isRenewable && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 99, background: 'var(--status-green-bg)', color: 'var(--status-green)', border: '1px solid var(--status-green-border)' }}>
-                <IconRefreshCw size={9} />Renovable
-              </span>
-            )}
-          </div>
-
-          <div style={{ flex: 1 }} />
-          <div style={{ height: 1, background: 'var(--surface-border)', margin: '0 -14px' }} />
-
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '10px 0 4px' }}>
-            <div>
-              <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 20, color: 'var(--ink)', lineHeight: 1 }}>{formatUSD(product.price_usd)}</p>
-              <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 2 }}>≈ S/ {(product.price_usd * exchangeRate).toFixed(2)}</p>
-              {showRenewalDiff && (
-                <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <IconRefreshCw size={9} />Renov. {formatUSD(renewalPrice)} ≈ S/ {(renewalPrice * exchangeRate).toFixed(2)}
-                </p>
-              )}
-              {isRenewable && !showRenewalDiff && (
-                <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <IconRefreshCw size={9} />Mismo precio al renovar
-                </p>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 2, marginBottom: 2 }}>
-              {product.terms && <button onClick={e => { e.stopPropagation(); setModal('terms') }} className="btn-ghost" style={{ padding: '5px 6px', color: 'var(--ink-faint)' }}><IconFileText size={13} /></button>}
-              {product.warranty && <button onClick={e => { e.stopPropagation(); setModal('warranty') }} className="btn-ghost" style={{ padding: '5px 6px', color: 'var(--ink-faint)' }}><IconShield size={13} /></button>}
-              {product.what_includes && <button onClick={e => { e.stopPropagation(); setModal('includes') }} className="btn-ghost" style={{ padding: '5px 6px', color: 'var(--ink-faint)' }}><IconPackage size={13} /></button>}
-              {isPedido && <button onClick={e => { e.stopPropagation(); setModal('pedido') }} className="btn-ghost" style={{ padding: '5px 6px', color: 'var(--status-yellow)' }}><IconInfo size={13} /></button>}
-            </div>
-          </div>
+        <div className="relative">
+          <ProductCover imageUrl={product.image_url} platformName={platformName} logoFilename={product.custom_platform_name ? null : product.platforms?.logo_filename} tint={tint} style={cardStyle} />
+          <span className="absolute top-3 left-3 badge !bg-[var(--surface-raised)] !text-[var(--ink)] !border-[var(--surface-border)] shadow-[0_2px_8px_var(--shadow-soft)] max-w-[60%]">
+            <span className="dot flex-shrink-0" style={{ color: cardStyle.color || tint }} />
+            <span className="truncate">{platformName}</span>
+          </span>
+          <span className="absolute top-3 right-3 shadow-[0_2px_8px_var(--shadow-soft)] rounded-full">
+            {inStock && <span className="badge badge-green !bg-[var(--surface-raised)]"><span className="dot dot-glow" />{stockCount} disp.</span>}
+            {isPedido && pedidoAvailable && <span className="badge badge-violet !bg-[var(--surface-raised)]"><IconClock size={11} />{product.stock_qty > 0 ? `${product.stock_qty} cupos` : 'A pedido'}</span>}
+            {isDisabled && <span className="badge !bg-[var(--surface-raised)]">Agotado</span>}
+          </span>
         </div>
 
-        <div style={{ padding: '0 14px 14px' }}>
-          <button onClick={() => canBuy && onBuy && onBuy(product)} disabled={isDisabled}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '10px 0', borderRadius: 11, fontSize: 13, fontWeight: 600, cursor: isDisabled ? 'not-allowed' : 'pointer', border: 'none', background: isDisabled ? 'var(--surface-overlay)' : accentColor, color: isDisabled ? 'var(--ink-faint)' : '#fff', opacity: isDisabled ? 0.65 : 1, transition: 'opacity 0.15s', fontFamily: 'DM Sans, sans-serif' }}
-            onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.opacity = '0.88' }}
-            onMouseLeave={e => { if (!isDisabled) e.currentTarget.style.opacity = '1' }}
-          >
-            <IconShoppingCart size={14} />
-            {isDisabled ? 'Sin stock' : isPedido ? 'Pedir' : 'Agregar'}
+        <div className="p-4 flex flex-col flex-1 gap-3">
+          <div>
+            <h3 className="font-display font-semibold text-[15px] leading-snug text-[var(--ink)] line-clamp-2">{product.name}</h3>
+            <p className="text-xs text-[var(--ink-muted)] mt-1">{deliveryTypeLabel} · {durationLabel}</p>
+          </div>
+
+          {isRenewable && (
+            <p className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-[var(--b)]">
+              <IconRefreshCw size={12} />
+              {showRenewalDiff ? <>Renueva a {formatUSD(renewalPrice)}</> : 'Renovable al mismo precio'}
+            </p>
+          )}
+
+          <div className="flex-1" />
+
+          <div className="flex items-end justify-between gap-2">
+            <div>
+              <p className="font-mono text-[1.4rem] font-medium leading-none text-[var(--ink)] tracking-tight">{formatUSD(product.price_usd)}</p>
+              <p className="text-[11.5px] text-[var(--ink-faint)] mt-1">≈ S/ {(product.price_usd * exchangeRate).toFixed(2)}</p>
+            </div>
+            {/* Detalles discretos: un icono por cada sección que el proveedor completó */}
+            {tabs.length > 0 && (
+              <div className="flex items-center gap-1.5" role="group" aria-label="Detalles del producto">
+                {tabs.map(t => (
+                  <button key={t.key} type="button" onClick={() => setDetail(t.key)} className="chip-icon" title={t.label} aria-label={t.label}>
+                    <t.icon size={15} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button onClick={handleBuy} disabled={isDisabled} className={`w-full ${added ? 'btn-primary' : 'btn-accent'}`}>
+            {added
+              ? <><IconCheck size={15} className="animate-pop" />Agregado</>
+              : <><IconShoppingCart size={15} />{isDisabled ? 'Sin stock' : isPedido ? 'Pedir' : 'Agregar'}</>}
           </button>
         </div>
-      </div>
+      </article>
 
-      <Modal open={modal === 'terms'} onClose={() => setModal(null)} title="Términos y condiciones">
-        <p style={{ fontSize: 13, color: 'var(--ink-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{product.terms}</p>
-      </Modal>
-      <Modal open={modal === 'warranty'} onClose={() => setModal(null)} title="Garantía">
-        <p style={{ fontSize: 13, color: 'var(--ink-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{product.warranty}</p>
-      </Modal>
-      <Modal open={modal === 'includes'} onClose={() => setModal(null)} title="¿Qué incluye?">
-        <p style={{ fontSize: 13, color: 'var(--ink-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{product.what_includes}</p>
-      </Modal>
-      <Modal open={modal === 'pedido'} onClose={() => setModal(null)} title="Producto a pedido">
-        <p style={{ fontSize: 13, color: 'var(--ink-muted)', lineHeight: 1.7 }}>
-          Al comprar, el sistema registra tu pedido sin credenciales. Luego debes notificar al proveedor para que las cargue manualmente.
-          {product.terms && <><br /><br />{product.terms}</>}
-        </p>
-        <button onClick={() => setModal(null)} className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}>Entendido</button>
+      <Modal open={!!detail} onClose={() => setDetail(null)} title={product.name} subtitle={`${platformName} · ${deliveryTypeLabel} · ${durationLabel}`}>
+        {isPedido && (
+          <div className="rounded-xl p-3 mb-4 bg-[var(--b-soft)] border border-[var(--b-line)] text-[12.5px] leading-relaxed text-[var(--ink-muted)] flex gap-2.5">
+            <IconClock size={15} className="text-[var(--b)] flex-shrink-0 mt-0.5" />
+            <span><b className="text-[var(--ink)] font-semibold">A pedido:</b> tu proveedor carga las credenciales después de la compra y te llegan a "Mis pedidos".</span>
+          </div>
+        )}
+        {tabs.length > 1 && (
+          <Tabs className="mb-4 !w-full" tabs={tabs.map(t => ({ value: t.key, label: <><t.icon size={13} />{t.short}</> }))} active={detail} onChange={setDetail} />
+        )}
+        {tabs.filter(t => t.key === detail).map(t => (
+          <div key={t.key} className="animate-fade-in">
+            {tabs.length === 1 && <p className="flex items-center gap-2 text-[13px] font-semibold text-[var(--ink)] mb-2"><t.icon size={14} className="text-[var(--a)]" />{t.label}</p>}
+            <p className="text-[13.5px] text-[var(--ink-muted)] leading-relaxed whitespace-pre-wrap">{product[t.field]}</p>
+          </div>
+        ))}
+        <div className="flex gap-2.5 mt-6">
+          <button className="btn-secondary flex-1" onClick={() => setDetail(null)}>Cerrar</button>
+          {canBuy && <button className="btn-primary flex-1" onClick={() => { handleBuy(); setDetail(null) }}><IconShoppingCart size={15} />{isPedido ? 'Pedir' : 'Agregar'}</button>}
+        </div>
       </Modal>
     </>
   )

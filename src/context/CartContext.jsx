@@ -1,9 +1,14 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
+import { useAuth } from '@/context/AuthContext'
 
 const CartContext = createContext(null)
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState([])
+  const { profile } = useAuth()
+
+  // Otro usuario en el mismo navegador no hereda el carrito anterior
+  useEffect(() => { setItems([]) }, [profile?.id])
 
   function addItem(product) {
     setItems(prev => [...prev, { ...product, uid: crypto.randomUUID() }])

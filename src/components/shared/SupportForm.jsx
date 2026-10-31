@@ -62,44 +62,46 @@ export default function SupportForm({ order, onClose }) {
 
   if (success) {
     return (
-      <div style={{ textAlign: 'center', padding: '16px 0' }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--status-green-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-          <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="var(--status-green)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
+      <div className="text-center py-6 animate-fade-in">
+        <div className="w-14 h-14 rounded-2xl mx-auto mb-4 grid place-items-center bg-[var(--a-soft)] border border-[var(--a-line)] text-[var(--a)] animate-pop">
+          <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
         </div>
-        <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, color: 'var(--ink)' }}>Ticket enviado</p>
-        <p style={{ fontSize: 13, color: 'var(--ink-muted)', marginTop: 4 }}>El proveedor fue notificado.</p>
+        <p className="font-display font-semibold text-lg text-[var(--ink)]">Ticket enviado</p>
+        <p className="text-sm text-[var(--ink-muted)] mt-1">Tu proveedor ya fue notificado.</p>
       </div>
     )
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12, color: 'var(--ink-muted)' }}>
-        Pedido <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600, color: 'var(--ink)' }}>#{order?.order_code}</span>
-        {' · '}{order?.products?.name}
+    <div className="space-y-4">
+      <div>
+        <p className="label">¿Qué pasa con la cuenta?</p>
+        <div className="grid grid-cols-2 gap-2">
+          {REASONS.map(r => (
+            <button
+              key={r.value}
+              type="button"
+              onClick={() => setReason(r.value)}
+              aria-pressed={reason === r.value}
+              className={`btn-secondary btn-sm !justify-start !h-auto !py-2.5 !whitespace-normal text-left ${reason === r.value ? 'is-down !border-[var(--a-line)] !text-[var(--a)]' : ''}`}
+            >
+              <span className="dot" style={{ color: reason === r.value ? 'var(--a)' : 'var(--surface-border-strong)' }} />
+              {r.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>
-        <label className="label">Motivo</label>
-        <select value={reason} onChange={e => setReason(e.target.value)} className="input">
-          <option value="">Selecciona un motivo...</option>
-          {REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
-      </div>
-
-      <div>
-        <label className="label">Descripción (opcional)</label>
-        <textarea value={description} onChange={e => setDescription(e.target.value)}
-          className="input" rows={3} placeholder="Describe el problema..." style={{ resize: 'none' }} />
+        <label className="label">Detalle (opcional)</label>
+        <textarea value={description} onChange={e => setDescription(e.target.value)} className="input" rows={3} placeholder="Ej: dice contraseña incorrecta desde ayer en la noche" />
       </div>
 
       {error && <Alert type="error">{error}</Alert>}
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={onClose} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-        <button onClick={handleSubmit} disabled={loading} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+      <div className="flex gap-2.5">
+        <button onClick={onClose} className="btn-ghost flex-1 justify-center">Cancelar</button>
+        <button onClick={handleSubmit} disabled={loading || !reason} className="btn-primary flex-[2]">
           {loading ? <Spinner size={15} /> : 'Enviar ticket'}
         </button>
       </div>

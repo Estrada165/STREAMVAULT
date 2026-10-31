@@ -68,23 +68,14 @@ export default function PhoneInput({ value, onChange, placeholder = '999 999 999
   return (
     <div>
       {label && <label className="label">{label}</label>}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="flex gap-2">
         {/* Selector de país */}
         <select
           value={selectedCountry.code}
           onChange={handleCountryChange}
-          style={{
-            background: 'var(--surface-overlay)',
-            border: '1px solid var(--surface-border)',
-            borderRadius: '0.75rem',
-            padding: '0.625rem 0.5rem',
-            fontSize: '0.875rem',
-            color: 'var(--ink)',
-            cursor: 'pointer',
-            outline: 'none',
-            flexShrink: 0,
-            minWidth: 110,
-          }}
+          className="input !w-auto flex-shrink-0 !pr-8 !pl-3"
+          style={{ minWidth: 104 }}
+          aria-label="País"
         >
           {COUNTRIES.map(c => (
             <option key={c.code} value={c.code}>
@@ -99,12 +90,12 @@ export default function PhoneInput({ value, onChange, placeholder = '999 999 999
           placeholder={placeholder}
           value={localNumber}
           onChange={handleNumberChange}
-          style={{ flex: 1, fontFamily: 'DM Mono, monospace' }}
+          style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-mono)' }}
           inputMode="tel"
         />
       </div>
       <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>
-        Número completo: <span style={{ fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)' }}>
+        Número completo: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink-muted)' }}>
           {selectedCountry.prefix}{localNumber.replace(/\D/g, '') || '···'}
         </span>
       </p>

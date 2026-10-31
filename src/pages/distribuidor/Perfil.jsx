@@ -3,10 +3,59 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useBalance } from '@/hooks/useBalance'
 import { PageHeader, Alert, Spinner } from '@/components/ui'
-import { IconUser, IconDollar, IconKey } from '@/assets/icons'
+import { IconUser, IconKey, IconWhatsApp, IconCheck } from '@/assets/icons'
 import { formatUSD } from '@/utils'
-import { DEFAULT_TEMPLATE } from '@/lib/whatsapp'
+import { DEFAULT_TEMPLATE, fillTemplate } from '@/lib/whatsapp'
 import PhoneInput from '@/components/shared/PhoneInput'
+import BrandColors from '@/components/shared/BrandColors'
+import { applyBrand } from '@/lib/brand'
+import { useToast } from '@/components/ui'
+
+/** Colores del panel del distribuidor: los suyos o los de su proveedor */
+function PanelColors() {
+  const { profile, provider, refreshProfile } = useAuth()
+  const toast = useToast()
+  const saved = profile?.ui_accent || null
+  const [value, setValue] = useState(saved)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => { setValue(saved) }, [saved])
+  // Vista previa en vivo; al salir sin guardar vuelve a lo guardado
+  useEffect(() => { applyBrand(value || provider?.brand_accent) }, [value, provider?.brand_accent])
+  useEffect(() => () => applyBrand(saved || provider?.brand_accent), [saved, provider?.brand_accent])
+
+  async function save() {
+    setSaving(true); setError('')
+    const { error: err } = await supabase.from('users').update({ ui_accent: value }).eq('id', profile.id)
+    if (err) setError(err.message?.includes('ui_accent') ? 'Falta ejecutar el SQL 008 en Supabase.' : err.message)
+    else { await refreshProfile(); toast.success('Colores guardados') }
+    setSaving(false)
+  }
+
+  const dirty = (value || null) !== saved
+  return (
+    <div className="card p-5 sm:p-6">
+      <div className="flex items-center gap-3 mb-5">
+        <span className="w-10 h-10 rounded-xl inset grid place-items-center text-[var(--ink-muted)] flex-shrink-0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22a10 10 0 110-20c5.5 0 10 4 10 9a5 5 0 01-5 5h-1.8a1.7 1.7 0 00-1.2 2.9A1.7 1.7 0 0112 22z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>
+        </span>
+        <div>
+          <h2 className="font-display font-semibold text-[var(--ink)]">Colores de tu panel</h2>
+          <p className="text-xs text-[var(--ink-muted)]">Solo cambian lo que tú ves. El logo y el nombre siguen siendo de {provider?.display_name || 'tu proveedor'}.</p>
+        </div>
+      </div>
+      <BrandColors value={value} onChange={setValue} inheritLabel={`Colores de ${provider?.display_name || 'mi proveedor'}`} inheritValue={provider?.brand_accent} />
+      {error && <div className="mt-3"><Alert type="error">{error}</Alert></div>}
+      {dirty && (
+        <div className="flex gap-2 mt-4 animate-fade-in">
+          <button onClick={() => setValue(saved)} className="btn-ghost">Descartar</button>
+          <button onClick={save} disabled={saving} className="btn-primary flex-1">{saving ? <Spinner size={16} /> : 'Guardar colores'}</button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function DistPerfil() {
   const { profile, refreshProfile } = useAuth()
@@ -134,177 +183,103 @@ export default function DistPerfil() {
     setSavingTemplate(false)
   }
 
+  const VARS = ['{nombre_cliente}', '{plataforma}', '{correo}', '{contrasena}', '{perfil}', '{pin}', '{url}', '{codigo}', '{duracion}', '{fecha_vencimiento}']
+  const preview = fillTemplate(template || DEFAULT_TEMPLATE, {
+    clientName: 'María', platformName: 'Netflix', email: 'cuenta01@correo.com', password: 'Clave2026',
+    profileName: 'Perfil 3', profilePin: '1234', durationDays: 30, expiresAt: new Date(Date.now() + 30 * 864e5).toISOString(), orderCode: 'ORD-8F2A91C3',
+  })
+  const SectionTitle = ({ icon: Icon, title, subtitle }) => (
+    <div className="flex items-center gap-3 mb-5">
+      <span className="w-10 h-10 rounded-xl inset grid place-items-center text-[var(--ink-muted)] flex-shrink-0"><Icon size={18} /></span>
+      <div>
+        <h2 className="font-display font-semibold text-[var(--ink)]">{title}</h2>
+        {subtitle && <p className="text-xs text-[var(--ink-muted)]">{subtitle}</p>}
+      </div>
+    </div>
+  )
+
   return (
     <div>
-      <PageHeader
-        title="Mi perfil"
-        subtitle="Configura tu cuenta y preferencias"
-      />
+      <PageHeader title="Mi" accent="perfil" subtitle="Tus datos, tu plantilla de WhatsApp, tus colores y tu contraseña" />
 
-      <div className="max-w-2xl space-y-5">
-
-        {/* Balance card */}
-        <div className="card p-5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[var(--surface-overlay)] flex items-center justify-center">
-            <IconDollar size={22} className="text-[var(--ink-muted)]" />
-          </div>
-
-          <div>
-            <p className="text-xs text-[var(--ink-faint)] uppercase font-bold tracking-wider">
-              Saldo disponible
-            </p>
-            <p className="font-display font-bold text-2xl text-[var(--ink)]">
-              {formatUSD(balance)}
-            </p>
-            <p className="text-xs text-[var(--ink-faint)]">
-              Recarga contactando a tu proveedor
-            </p>
-          </div>
-        </div>
-
-        {/* Personal info */}
-        <div className="card p-6 space-y-4">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-9 h-9 rounded-xl bg-[var(--surface-overlay)] flex items-center justify-center">
-              <IconUser size={18} className="text-[var(--ink-muted)]" />
-            </div>
-            <h2 className="font-display font-semibold text-[var(--ink)]">
-              Información personal
-            </h2>
-          </div>
-
-          <div>
-            <label className="label">Correo electrónico</label>
-            <input
-              className="input"
-              value={profile?.email || ''}
-              disabled
-            />
-          </div>
-
-          <div>
-            <label className="label">Nombre completo</label>
-            <input
-              className="input"
-              placeholder="Tu nombre"
-              value={form.full_name}
-              onChange={e =>
-                setForm(f => ({ ...f, full_name: e.target.value }))
-              }
-            />
-          </div>
-
-          <PhoneInput
-            label="Teléfono / WhatsApp"
-            value={form.phone}
-            onChange={value =>
-              setForm(f => ({ ...f, phone: value }))
-            }
-          />
-
-          {error && <Alert type="error">{error}</Alert>}
-          {success && <Alert type="success">{success}</Alert>}
-
-          <button
-            onClick={saveProfile}
-            disabled={saving}
-            className="btn-primary w-full justify-center"
-          >
-            {saving ? <Spinner size={16} /> : 'Guardar cambios'}
-          </button>
-        </div>
-
-        {/* WhatsApp template */}
-        <div className="card p-6 space-y-4">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-9 h-9 rounded-xl bg-[var(--surface-overlay)] flex items-center justify-center text-[var(--ink-muted)]">
-              <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-              </svg>
-            </div>
-
-            <div>
-              <h2 className="font-display font-semibold text-[var(--ink)]">
-                Plantilla de WhatsApp
-              </h2>
-              <p className="text-xs text-[var(--ink-muted)]">
-                Personaliza el mensaje que envías a tus clientes
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-[var(--surface-overlay)] rounded-xl px-3 py-2 text-xs text-[var(--ink-faint)] leading-relaxed">
-            Variables disponibles:{' '}
-            <span className="font-mono">
-              {'{nombre_cliente}'} {'{plataforma}'} {'{correo}'} {'{contrasena}'} {'{perfil}'} {'{pin}'} {'{url}'} {'{codigo}'} {'{duracion}'} {'{fecha_vencimiento}'}
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-5 items-start">
+        <div className="xl:col-span-2 space-y-5">
+          <div className="card p-5 flex items-center gap-4">
+            <span className="w-14 h-14 rounded-2xl inset grid place-items-center font-display text-xl font-semibold text-[var(--ink)] uppercase">
+              {(profile?.full_name || profile?.email || '?')[0]}
             </span>
+            <div className="min-w-0">
+              <p className="font-semibold text-[var(--ink)] truncate">{profile?.full_name || 'Sin nombre'}</p>
+              <p className="text-xs text-[var(--ink-faint)] truncate">{profile?.email}</p>
+            </div>
+            <div className="ml-auto text-right lg:hidden">
+              <p className="eyebrow">Saldo</p>
+              <p className="font-mono text-xl grad">{formatUSD(balance)}</p>
+            </div>
           </div>
 
-          <textarea
-            className="input resize-none font-mono text-xs leading-relaxed"
-            rows={10}
-            value={template}
-            onChange={e => setTemplate(e.target.value)}
-          />
+          <div className="card p-5 sm:p-6 space-y-4">
+            <SectionTitle icon={IconUser} title="Información personal" />
+            <div>
+              <label className="label">Correo electrónico</label>
+              <input className="input" value={profile?.email || ''} disabled />
+            </div>
+            <div>
+              <label className="label">Nombre completo</label>
+              <input className="input" placeholder="Tu nombre" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
+            </div>
+            <PhoneInput label="Teléfono / WhatsApp" value={form.phone} onChange={value => setForm(f => ({ ...f, phone: value }))} />
+            {error && <Alert type="error">{error}</Alert>}
+            {success && <Alert type="success">{success}</Alert>}
+            <button onClick={saveProfile} disabled={saving} className="btn-primary w-full">{saving ? <Spinner size={16} /> : 'Guardar cambios'}</button>
+          </div>
 
-          {successTemplate && <Alert type="success">Plantilla guardada</Alert>}
-
-          <button
-            onClick={saveTemplate}
-            disabled={savingTemplate}
-            className="btn-primary w-full justify-center"
-          >
-            {savingTemplate ? <Spinner size={16} /> : 'Guardar plantilla'}
-          </button>
+          <div className="card p-5 sm:p-6 space-y-4">
+            <SectionTitle icon={IconKey} title="Cambiar contraseña" />
+            <div>
+              <label className="label">Nueva contraseña</label>
+              <input type="password" className="input" placeholder="Mínimo 6 caracteres" autoComplete="new-password" value={passwords.new} onChange={e => setPasswords(p => ({ ...p, new: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Confirmar nueva contraseña</label>
+              <input type="password" className="input" placeholder="Repite la contraseña" autoComplete="new-password" value={passwords.confirm} onChange={e => setPasswords(p => ({ ...p, confirm: e.target.value }))} />
+            </div>
+            {errorPass && <Alert type="error">{errorPass}</Alert>}
+            {successPass && <Alert type="success">{successPass}</Alert>}
+            <button onClick={changePassword} disabled={savingPass} className="btn-secondary w-full">{savingPass ? <Spinner size={16} /> : 'Cambiar contraseña'}</button>
+          </div>
         </div>
 
-        {/* Change password */}
-        <div className="card p-6 space-y-4">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-9 h-9 rounded-xl bg-[var(--surface-overlay)] flex items-center justify-center">
-              <IconKey size={18} className="text-[var(--ink-muted)]" />
+        <div className="xl:col-span-3 space-y-5">
+        <div className="card p-5 sm:p-6">
+          <SectionTitle icon={IconWhatsApp} title="Plantilla de WhatsApp" subtitle="El mensaje con credenciales que envías a tus clientes" />
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="space-y-3">
+              <p className="label">Toca una variable para agregarla</p>
+              <div className="flex flex-wrap gap-1.5">
+                {VARS.map(v => (
+                  <button key={v} type="button" onClick={() => setTemplate(t => (t || '') + (t?.endsWith('\n') || !t ? '' : ' ') + v)} className="badge hover:!border-[var(--a-line)] hover:!text-[var(--a)] font-mono !text-[11px] cursor-pointer">{v}</button>
+                ))}
+              </div>
+              <textarea className="input font-mono !text-[12.5px] leading-relaxed" rows={14} value={template} onChange={e => setTemplate(e.target.value)} aria-label="Plantilla" />
+              <div className="flex gap-2">
+                <button onClick={() => setTemplate(DEFAULT_TEMPLATE)} className="btn-ghost">Restaurar</button>
+                <button onClick={saveTemplate} disabled={savingTemplate} className="btn-primary flex-1">{savingTemplate ? <Spinner size={16} /> : successTemplate ? <><IconCheck size={15} className="animate-pop" />Guardada</> : 'Guardar plantilla'}</button>
+              </div>
             </div>
-            <h2 className="font-display font-semibold text-[var(--ink)]">
-              Cambiar contraseña
-            </h2>
+            <div>
+              <p className="label">Vista previa</p>
+              <div className="rounded-2xl p-4 min-h-[280px] border border-[var(--surface-border)]" style={{ background: 'color-mix(in srgb, var(--a) 6%, var(--surface-overlay))' }}>
+                <div className="ml-auto max-w-[92%] rounded-2xl rounded-tr-md px-3.5 py-2.5 bg-[var(--surface-raised)] border border-[var(--surface-border)] shadow-[0_2px_6px_var(--shadow)]">
+                  <p className="text-[13px] leading-relaxed text-[var(--ink)] whitespace-pre-wrap break-words">{preview}</p>
+                  <p className="text-[10px] text-[var(--ink-faint)] text-right mt-1">12:30 ✓✓</p>
+                </div>
+              </div>
+              <p className="text-[11px] text-[var(--ink-faint)] mt-2">Las líneas sin dato (por ejemplo, sin PIN) se ocultan solas.</p>
+            </div>
           </div>
-
-          <div>
-            <label className="label">Nueva contraseña</label>
-            <input
-              type="password"
-              className="input"
-              placeholder="Mínimo 6 caracteres"
-              value={passwords.new}
-              onChange={e =>
-                setPasswords(p => ({ ...p, new: e.target.value }))
-              }
-            />
-          </div>
-
-          <div>
-            <label className="label">Confirmar nueva contraseña</label>
-            <input
-              type="password"
-              className="input"
-              placeholder="Repite la contraseña"
-              value={passwords.confirm}
-              onChange={e =>
-                setPasswords(p => ({ ...p, confirm: e.target.value }))
-              }
-            />
-          </div>
-
-          {errorPass && <Alert type="error">{errorPass}</Alert>}
-          {successPass && <Alert type="success">{successPass}</Alert>}
-
-          <button
-            onClick={changePassword}
-            disabled={savingPass}
-            className="btn-primary w-full justify-center"
-          >
-            {savingPass ? <Spinner size={16} /> : 'Cambiar contraseña'}
-          </button>
+        </div>
+        <PanelColors />
         </div>
       </div>
     </div>

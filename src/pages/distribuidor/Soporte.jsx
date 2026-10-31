@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { PageHeader, EmptyState, Spinner, Badge } from '@/components/ui'
+import { Link } from 'react-router-dom'
+import { PageHeader, EmptyState, Spinner, Badge, PageLoader } from '@/components/ui'
 import { IconHeadphones, IconTrash, IconWhatsApp } from '@/assets/icons'
 import { formatDateTime, getReasonLabel, getTicketStatusColor } from '@/utils'
+import { waLink } from '@/lib/whatsapp'
 
 export default function DistSoporte() {
   const { profile, provider } = useAuth()
@@ -30,126 +32,75 @@ export default function DistSoporte() {
     setDeletingId(null)
   }
 
-  if (loading) return (
-    <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}>
-      <Spinner size={32} />
-    </div>
-  )
+  if (loading) return <PageLoader />
 
-  // Número WA del proveedor para notificar seguimiento
   const providerPhone = provider?.whatsapp_support?.replace(/\D/g, '')
   const distName = profile?.full_name || profile?.email?.split('@')[0] || 'Distribuidor'
+  const STATUS = { abierto: 'Abierto', en_revision: 'En revisión', resuelto: 'Resuelto' }
+  const openCount = tickets.filter(t => t.status !== 'resuelto').length
 
   return (
     <div>
-      <PageHeader title="Soporte" subtitle="Historial de tus tickets enviados" />
+      <PageHeader
+        title="Soporte"
+        subtitle={openCount ? `${openCount} ticket${openCount !== 1 ? 's' : ''} en curso` : 'Tus tickets y las respuestas de tu proveedor'}
+        action={providerPhone && (
+          <a className="btn-secondary" target="_blank" rel="noreferrer" href={waLink(providerPhone)}><IconWhatsApp size={15} />Escribir al proveedor</a>
+        )}
+      />
 
       {tickets.length === 0 ? (
-        <EmptyState
-          icon={IconHeadphones}
-          title="Sin tickets"
-          description="No has abierto ningún ticket de soporte. Puedes hacerlo desde tus pedidos activos."
-        />
+        <div className="card">
+          <EmptyState
+            icon={IconHeadphones}
+            title="Sin tickets por ahora"
+            description="Si una cuenta falla, ábrelo desde Mis pedidos con el botón de soporte. Tu proveedor recibe el aviso al instante."
+            action={<Link to="/dashboard" className="btn-primary">Ir a mis pedidos</Link>}
+          />
+        </div>
       ) : (
         <div className="space-y-3 stagger">
           {tickets.map(t => {
-            // Mensaje WA al proveedor cuando el ticket ya fue resuelto
-            const waResolvedMsg =
+            const waMsg =
               `Hola! Soy *${distName}*\n\n` +
-              `Queria confirmar que recibi la solucion de mi ticket *#${t.ticket_code}*.\n` +
+              `Te escribo por mi ticket *#${t.ticket_code}* - *${getReasonLabel(t.reason)}*\n` +
               `Pedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n` +
-              (t.provider_response ? `\nRespuesta recibida: "${t.provider_response}"` : '') +
-              `\n\nGracias por la atencion!`
-
+              (t.description ? `\nDetalle: ${t.description}` : '') +
+              `\n\nPodrias ayudarme?`
             return (
-              <div key={t.id} className="card p-4">
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flex: 1 }}>
-                    <div style={{
-                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 5,
-                      background: t.status === 'abierto' ? 'var(--status-red)'
-                        : t.status === 'en_revision' ? 'var(--status-yellow)'
-                        : 'var(--status-green)',
-                    }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--ink-faint)' }}>
-                          #{t.ticket_code}
-                        </span>
-                        <Badge color={getTicketStatusColor(t.status)}>
-                          {t.status === 'abierto' ? 'Abierto' : t.status === 'en_revision' ? 'En revisión' : 'Resuelto'}
-                        </Badge>
-                      </div>
-                      <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 2 }}>
-                        {getReasonLabel(t.reason)}
-                      </p>
-                      <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-                        Pedido #{t.orders?.order_code} · {t.orders?.products?.name}
-                      </p>
-                      {t.description && (
-                        <p style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 4 }}>{t.description}</p>
-                      )}
-                      <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 6 }}>
-                        {formatDateTime(t.created_at)}
-                      </p>
+              <article key={t.id} className="card p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                      <Badge color={getTicketStatusColor(t.status)} dot>{STATUS[t.status] || t.status}</Badge>
+                      <span className="font-mono text-[11px] text-[var(--ink-faint)]">#{t.ticket_code}</span>
+                      <span className="text-[11px] text-[var(--ink-faint)]">· {formatDateTime(t.created_at)}</span>
                     </div>
+                    <h3 className="font-display font-semibold text-[15px] text-[var(--ink)]">{getReasonLabel(t.reason)}</h3>
+                    <p className="text-xs text-[var(--ink-muted)] mt-0.5">Pedido <span className="font-mono">#{t.orders?.order_code}</span> · {t.orders?.products?.name}</p>
+                    {t.description && <p className="text-[13px] text-[var(--ink-muted)] mt-2 leading-relaxed">{t.description}</p>}
                   </div>
-
-                  {/* Botones derecha */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                    {/* WA en tickets NO resueltos — para contactar al proveedor */}
+                  <div className="flex gap-2">
                     {t.status !== 'resuelto' && providerPhone && (
-                      <a href={`https://wa.me/${providerPhone}?text=${encodeURIComponent(
-                        `Hola! Soy *${distName}*\n\n` +
-                        `Te escribo por mi ticket *#${t.ticket_code}* - *${getReasonLabel(t.reason)}*\n` +
-                        `Pedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n` +
-                        (t.description ? `\nDetalle: ${t.description}` : '') +
-                        `\n\nPodrias ayudarme?`
-                      )}`}
-                        target="_blank" rel="noreferrer"
-                        style={{
-                          fontSize: 12, padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 5,
-                          borderRadius: 8, background: '#25d366', color: '#fff', fontWeight: 600,
-                          fontFamily: 'DM Sans, sans-serif', textDecoration: 'none', whiteSpace: 'nowrap',
-                        }}>
-                        <IconWhatsApp size={13} />Notificar
+                      <a href={waLink(providerPhone, waMsg)} target="_blank" rel="noreferrer" className="btn-accent btn-sm">
+                        <IconWhatsApp size={14} />Avisar
                       </a>
                     )}
-                    {/* Eliminar solo cuando está resuelto */}
                     {t.status === 'resuelto' && (
-                      <button
-                        onClick={() => deleteTicket(t.id)}
-                        disabled={deletingId === t.id}
-                        title="Eliminar ticket"
-                        style={{
-                          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                          background: 'var(--surface-overlay)',
-                          border: '1px solid var(--surface-border)',
-                          color: 'var(--ink-faint)',
-                          cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          opacity: deletingId === t.id ? 0.5 : 1,
-                          transition: 'color 0.15s, border-color 0.15s',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--status-red)'; e.currentTarget.style.borderColor = 'var(--status-red)' }}
-                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--ink-faint)'; e.currentTarget.style.borderColor = 'var(--surface-border)' }}
-                      >
+                      <button onClick={() => deleteTicket(t.id)} disabled={deletingId === t.id} className="btn-secondary btn-sm btn-icon hover:!text-[var(--status-red)]" aria-label="Eliminar ticket" title="Eliminar ticket">
                         {deletingId === t.id ? <Spinner size={13} /> : <IconTrash size={14} />}
                       </button>
                     )}
                   </div>
                 </div>
 
-                {/* Respuesta del proveedor */}
                 {t.provider_response && (
-                  <div style={{ marginTop: 12, marginLeft: 18, background: 'var(--surface-overlay)', borderRadius: 10, padding: '8px 12px' }}>
-                    <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 4 }}>
-                      Respuesta del proveedor
-                    </p>
-                    <p style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{t.provider_response}</p>
+                  <div className="mt-4 rounded-xl p-3.5 bg-[var(--surface-side)] border border-[var(--surface-border)] relative">
+                    <p className="eyebrow mb-1.5 flex items-center gap-1.5"><span className="dot" style={{ color: 'var(--a)' }} />Respuesta de tu proveedor</p>
+                    <p className="text-[13.5px] text-[var(--ink)] leading-relaxed">{t.provider_response}</p>
                   </div>
                 )}
-              </div>
+              </article>
             )
           })}
         </div>

@@ -122,7 +122,7 @@ export function getReasonLabel(reason) {
 /** Ticket status color */
 export function getTicketStatusColor(status) {
   const colors = {
-    abierto: 'red',
+    abierto: 'violet',
     en_revision: 'yellow',
     resuelto: 'green',
   }

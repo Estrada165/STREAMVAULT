@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { formatDate, formatUSD, getLogoPath } from '@/utils'
-import { buildWhatsAppUrl } from '@/lib/whatsapp'
+import { formatDate, formatUSD } from '@/utils'
+import { PlatformLogo } from '@/utils/platform'
+import { buildWhatsAppUrl, waLink } from '@/lib/whatsapp'
+import { clientReminder, providerRenewal, markReminded } from '@/lib/reminders'
 import { Modal, CopyField, Alert, Spinner } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import PhoneInput from './PhoneInput'
@@ -10,40 +12,17 @@ import {
 } from '@/assets/icons'
 import SupportForm from './SupportForm'
 
-function getPlatformColor(name = '') {
-  const n = name.toLowerCase()
-  if (n.includes('netflix')) return '#e50914'
-  if (n.includes('disney')) return '#006e99'
-  if (n.includes('hbo') || n.includes('max')) return '#5822b4'
-  if (n.includes('amazon') || n.includes('prime')) return '#ff9900'
-  if (n.includes('spotify')) return '#1db954'
-  if (n.includes('youtube')) return '#ff0000'
-  if (n.includes('crunchyroll')) return '#f47521'
-  if (n.includes('apple')) return '#555555'
-  if (n.includes('paramount')) return '#0064ff'
-  if (n.includes('directv')) return '#00a8e0'
-  if (n.includes('movistar')) return '#019df4'
-  if (n.includes('deezer')) return '#a238ff'
-  return 'var(--ink-faint)'
-}
-
 function daysRemaining(expiresAt) {
   const now = new Date()
   const exp = new Date(expiresAt)
   return Math.ceil((exp - now) / (1000 * 60 * 60 * 24))
 }
 
-function getDaysPillStyle(days) {
-  if (days <= 5) return { background: 'var(--status-red-bg)', color: 'var(--status-red)', border: '1px solid var(--status-red)' }
-  if (days <= 10) return { background: 'var(--status-yellow-bg)', color: 'var(--status-yellow)', border: '1px solid var(--status-yellow)' }
-  return { background: 'var(--status-green-bg)', color: 'var(--status-green)', border: '1px solid var(--status-green)' }
-}
-
 const STATUS_CONFIG = {
-  activo: { label: 'Activo', color: 'var(--status-green)', bg: 'var(--status-green-bg)', border: 'var(--status-green-border)' },
-  pendiente_credenciales: { label: 'Pendiente', color: 'var(--status-yellow)', bg: 'var(--status-yellow-bg)', border: 'var(--status-yellow-border)' },
-  expirado: { label: 'Expirado', color: 'var(--ink-faint)', bg: 'var(--surface-overlay)', border: 'var(--surface-border)' },
-  cancelado: { label: 'Cancelado', color: 'var(--status-red)', bg: 'var(--status-red-bg)', border: 'var(--status-red-border)' },
+  activo: { label: 'Activo', badge: 'green' },
+  pendiente_credenciales: { label: 'Pendiente', badge: 'violet' },
+  expirado: { label: 'Expirado', badge: 'neutral' },
+  cancelado: { label: 'Cancelado', badge: 'red' },
 }
 
 export default function OrderCard({ order, template, exchangeRate = 3.5, onCredentialsUpdated }) {
@@ -61,8 +40,7 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
   const platform = product?.platforms
   const hasCreds = !!(item?.email || item?.url || item?.activation_code)
   const days = order.expires_at ? daysRemaining(order.expires_at) : null
-  const pillStyle = days !== null ? getDaysPillStyle(days) : null
-  const accentColor = getPlatformColor(platform?.name || '')
+  const daysTone = days === null ? null : days <= 5 ? 'red' : days <= 10 ? 'yellow' : 'green'
   const sc = STATUS_CONFIG[order.status] || STATUS_CONFIG.expirado
   const showRenewalBanner = !renewDismissed && order.status === 'activo' && days !== null && days <= 7
   const showRenewBtn = order.status === 'activo' || order.status === 'expirado'
@@ -90,42 +68,26 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
   function handleNotifyProvider() {
     const provWA = product?.providers?.whatsapp_support
     const phone = provWA ? provWA.replace(/\D/g, '') : ''
-    const msg = `Hola! Realice el pedido *${order.order_code}* de *${product?.name}*. Por favor confirma cuando las credenciales esten listas. Gracias!`
-    const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`
+    const msg = `👋 ¡Hola! Realicé el pedido *${order.order_code}* de *${product?.name}*.\n\n¿Me avisas cuando las credenciales estén listas? ¡Gracias! 🙌`
+    const url = phone ? waLink(phone, msg) : waLink('', msg)
     window.open(url, '_blank')
   }
 
   function handleRenewWhatsApp() {
-    const provWA = product?.providers?.whatsapp_support
-    const phone = provWA ? provWA.replace(/\D/g, '') : ''
-    const daysText = days !== null && days <= 0 ? 'ya vencio' : days !== null ? `vence en ${days} dia${days === 1 ? '' : 's'}` : 'esta por vencer'
-    const costUsd = product?.renewal_price_usd || order.price_paid
-    const costPen = (parseFloat(costUsd) * exchangeRate).toFixed(2)
-    const msg =
-      `Hola! Mi pedido *${order.order_code}* de *${product?.name}* ${daysText}.\n\n` +
-      (item?.email ? `Cuenta: ${item.email}\n` : '') +
-      (item?.password ? `Contrasena: ${item.password}\n` : '') +
-      `\nCosto de renovacion: *S/ ${costPen}* (~$${parseFloat(costUsd).toFixed(2)})\n\n` +
-      `Me puedes ayudar con la renovacion? Gracias!`
-    const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`
-    window.open(url, '_blank')
+    const phone = product?.providers?.whatsapp_support || ''
+    window.open(waLink(phone, providerRenewal({
+      orderCode: order.order_code, productName: product?.name, email: item?.email,
+      expiresAt: order.expires_at, costUsd: product?.renewal_price_usd || order.price_paid, exchangeRate,
+    })), '_blank')
   }
 
-  // ── NUEVO: Avisar al cliente final que su cuenta vence pronto ──
+  // Avisar al cliente final que su cuenta vence pronto (sin precios, credenciales ni códigos internos)
   function handleNotifyClient() {
     if (!order.client_whatsapp) return
-    const daysText = days !== null && days <= 0 ? 'ya vencio' : days !== null ? `vence en ${days} dia${days === 1 ? '' : 's'}` : 'esta por vencer'
-    const costUsd = parseFloat(product?.renewal_price_usd || order.price_paid)
-    const costPen = (costUsd * exchangeRate).toFixed(2)
-    const msg =
-      `Hola *${order.client_name || 'cliente'}*!\n\n` +
-      `Tu acceso a *${product?.name}* ${daysText}.\n\n` +
-      (item?.email ? `Correo: ${item.email}\n` : '') +
-      (item?.password ? `Contrasena: ${item.password}\n` : '') +
-      `\nCosto de renovacion: *S/ ${costPen}*\n\n` +
-      `Para renovar, contactame. Gracias!`
-    const phone = order.client_whatsapp.replace(/\D/g, '')
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+    window.open(waLink(order.client_whatsapp, clientReminder({
+      clientName: order.client_name, platformName: platform?.name || product?.name, expiresAt: order.expires_at,
+    })), '_blank')
+    markReminded(order.id)
   }
 
   function openEditClient() {
@@ -149,9 +111,14 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
     setEditSaving(false)
   }
 
-  const ActionBtn = ({ onClick, title, bg, color, border, children }) => (
-    <button onClick={e => { e.stopPropagation(); onClick() }} title={title}
-      style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: bg || 'var(--surface-overlay)', border: border || '1px solid var(--surface-border)', color: color || 'var(--ink-faint)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+
+  const IconKey_ = ({ onClick, title, tone = '', children }) => (
+    <button
+      onClick={e => { e.stopPropagation(); onClick() }}
+      title={title}
+      aria-label={title}
+      className={`btn-secondary btn-sm btn-icon ${tone}`}
+    >
       {children}
     </button>
   )
@@ -167,160 +134,126 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
 
   return (
     <>
-      <div style={{ background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', borderLeft: `3px solid ${sc.color}`, borderRadius: '0 12px 12px 0', overflow: 'hidden' }}>
+      <article className={`card overflow-hidden ${order.status === 'expirado' ? 'opacity-80' : ''}`}>
 
         {showRenewalBanner && (
-          <div style={{ background: days <= 0 ? 'var(--status-red-bg)' : 'var(--status-yellow-bg)', borderBottom: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <IconAlertCircle size={13} style={{ color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)', flexShrink: 0 }} />
-            <p style={{ flex: 1, fontSize: 12, fontWeight: 500, color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)' }}>
-              {days <= 0 ? 'Vencio. Deseas renovarlo?' : `Vence en ${days}d. Confirmas renovacion?`}
-            </p>
-            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-              <button onClick={e => { e.stopPropagation(); handleRenewWhatsApp() }}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 7, background: '#25d366', border: 'none', color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-                <IconWhatsApp size={11} /> Renovar
-              </button>
-              <button onClick={e => { e.stopPropagation(); setRenewDismissed(true) }}
-                style={{ padding: '3px 10px', borderRadius: 7, background: 'transparent', border: `1px solid ${days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)'}`, color: days <= 0 ? 'var(--status-red)' : 'var(--status-yellow)', fontSize: 11, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-                Descartar
-              </button>
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b text-[12.5px] font-medium ${days <= 0 ? 'bg-[var(--status-red-bg)] border-[var(--status-red-border)] text-[var(--status-red)]' : 'bg-[var(--status-yellow-bg)] border-[var(--status-yellow-border)] text-[var(--status-yellow)]'}`}>
+            <IconAlertCircle size={14} className="flex-shrink-0" />
+            <p className="flex-1 min-w-[150px]">{days <= 0 ? 'Venció. ¿Lo renuevas?' : `Vence en ${days} día${days === 1 ? '' : 's'}. ¿Confirmas la renovación?`}</p>
+            <div className="flex gap-2">
+              <button onClick={e => { e.stopPropagation(); handleRenewWhatsApp() }} className="btn-primary btn-sm"><IconWhatsApp size={13} />Renovar</button>
+              <button onClick={e => { e.stopPropagation(); setRenewDismissed(true) }} className="btn-ghost btn-sm !text-current">Descartar</button>
             </div>
           </div>
         )}
 
-        <div onClick={() => hasCreds && setExpanded(e => !e)}
-          style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, cursor: hasCreds ? 'pointer' : 'default' }}>
-
-          <div style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: `${accentColor}15`, border: `1px solid ${accentColor}25`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-            {platform?.logo_filename
-              ? <img src={getLogoPath(platform.logo_filename)} alt={platform.name} style={{ width: 26, height: 26, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
-              : <span style={{ fontSize: 12, fontWeight: 800, color: accentColor }}>{platform?.name?.[0]}</span>
-            }
-          </div>
-
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{product?.name}</span>
-              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 99, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>{sc.label}</span>
+        <div
+          onClick={() => hasCreds && setExpanded(e => !e)}
+          className={`p-4 flex flex-col sm:flex-row sm:items-center gap-3 ${hasCreds ? 'cursor-pointer' : ''}`}
+        >
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <PlatformLogo name={platform?.name} filename={platform?.logo_filename} size={42} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-display font-semibold text-[15px] text-[var(--ink)] truncate max-w-full">{product?.name}</h3>
+                <span className={`badge badge-${sc.badge}`}>{sc.badge === 'green' && <span className="dot dot-glow" />}{sc.label}</span>
+              </div>
+              <div className="flex items-center gap-x-3 gap-y-1 mt-1 flex-wrap text-xs text-[var(--ink-muted)]">
+                <span className="font-mono text-[11px] text-[var(--ink-faint)]">{order.order_code}</span>
+                {order.client_name && <span className="inline-flex items-center gap-1"><IconUser size={11} />{order.client_name}</span>}
+                {days !== null && order.status === 'activo' && (
+                  <span className={`days-pill ${daysTone}`}><IconClock size={10} />{days <= 0 ? 'Vencido' : `${days}d`}</span>
+                )}
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--ink-faint)' }}>#{order.order_code}</span>
-              {order.client_name && (
-                <span style={{ fontSize: 11, color: 'var(--ink-muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <IconUser size={10} />{order.client_name}
-                </span>
-              )}
-              {days !== null && order.status === 'activo' && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600, ...pillStyle }}>
-                  <IconClock size={9} />{days <= 0 ? 'Vencido' : `${days}d`}
-                </span>
-              )}
+            <div className="text-right sm:hidden flex-shrink-0">
+              <p className="font-mono text-[15px] text-[var(--ink)]">{formatUSD(order.price_paid)}</p>
+              <p className="text-[11px] text-[var(--ink-faint)]">{formatDate(order.created_at)}</p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <div style={{ textAlign: 'right', marginRight: 2 }}>
-              <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>{formatUSD(order.price_paid)}</p>
-              <p style={{ fontSize: 10, color: 'var(--ink-faint)' }}>{formatDate(order.created_at)}</p>
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <div className="text-right mr-1 hidden sm:block">
+              <p className="font-mono text-[15px] text-[var(--ink)]">{formatUSD(order.price_paid)}</p>
+              <p className="text-[11px] text-[var(--ink-faint)]">{formatDate(order.created_at)}</p>
             </div>
             {hasCreds && order.client_whatsapp && (
-              <ActionBtn onClick={handleSendCreds} title="Enviar credenciales" bg="#25d366" color="white" border="none">
-                <IconWhatsApp size={14} />
-              </ActionBtn>
+              <button onClick={e => { e.stopPropagation(); handleSendCreds() }} className="btn-accent btn-sm flex-1 sm:flex-none" title="Enviar credenciales al cliente">
+                <IconWhatsApp size={14} />Enviar
+              </button>
             )}
             {!hasCreds && order.status === 'pendiente_credenciales' && (
-              <ActionBtn onClick={handleNotifyProvider} title="Notificar proveedor">
-                <IconSend size={13} />
-              </ActionBtn>
+              <button onClick={e => { e.stopPropagation(); handleNotifyProvider() }} className="btn-secondary btn-sm btn-violet flex-1 sm:flex-none">
+                <IconSend size={13} />Avisar proveedor
+              </button>
             )}
-            {/* ── Avisar al cliente que vence pronto ── */}
             {showNotifyClient && (
-              <ActionBtn
-                onClick={handleNotifyClient}
-                title="Avisar vencimiento al cliente"
-                bg="var(--status-yellow-bg)"
-                color="var(--status-yellow)"
-                border="1px solid var(--status-yellow-border)">
-                <IconWhatsApp size={13} />
-              </ActionBtn>
+              <IconKey_ onClick={handleNotifyClient} title="Avisar vencimiento al cliente" tone="!text-[var(--status-yellow)]"><IconClock size={14} /></IconKey_>
             )}
             {showRenewBtn && (
-              <ActionBtn onClick={handleRenewWhatsApp} title="Solicitar renovacion al proveedor"
-                bg="var(--status-green-bg)" color="var(--status-green)" border="1px solid var(--status-green)">
-                <IconRefreshCw size={13} />
-              </ActionBtn>
+              <IconKey_ onClick={handleRenewWhatsApp} title="Pedir renovación al proveedor" tone="!text-[var(--a)]"><IconRefreshCw size={14} /></IconKey_>
             )}
-            <ActionBtn onClick={openEditClient} title="Editar datos del cliente">
-              <IconEdit size={13} />
-            </ActionBtn>
-            <ActionBtn onClick={() => setShowSupport(true)} title="Soporte">
-              <IconHeadphones size={13} />
-            </ActionBtn>
+            <IconKey_ onClick={openEditClient} title="Editar datos del cliente"><IconEdit size={14} /></IconKey_>
+            <IconKey_ onClick={() => setShowSupport(true)} title="Soporte"><IconHeadphones size={14} /></IconKey_>
             {hasCreds && (
-              <button onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
-                style={{ width: 32, height: 32, borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-faint)', flexShrink: 0, transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0)' }}>
-                <IconChevronDown size={15} />
+              <button
+                onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
+                aria-expanded={expanded}
+                aria-label={expanded ? 'Ocultar credenciales' : 'Ver credenciales'}
+                className="btn-ghost btn-sm !px-2"
+              >
+                <IconChevronDown size={16} className={`transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`} />
               </button>
             )}
           </div>
         </div>
 
         {expanded && hasCreds && (
-          <div style={{ borderTop: '1px solid var(--surface-border)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {credFields.map(f => (
-              <CopyField key={f.key} value={item[f.key]} icon={f.icon} label={f.label} hidden={f.hidden} />
-            ))}
-            {item?.extra_notes && (
-              <div style={{ background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5 }}>{item.extra_notes}</div>
-            )}
-            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-              {order.client_whatsapp && (
-                <button onClick={handleSendCreds} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px', borderRadius: 10, background: '#25d366', border: 'none', color: 'white', fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-                  <IconWhatsApp size={13} />Enviar credenciales
-                </button>
-              )}
-              <button onClick={handleSendCreds} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px', borderRadius: 10, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', color: 'var(--ink-muted)', fontSize: 12, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }} title="Reenviar">
-                <IconRefreshCw size={13} />
-              </button>
+          <div className="border-t border-[var(--surface-border)] bg-[var(--surface-side)] p-4 animate-fade-in">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {credFields.map(f => (
+                <CopyField key={f.key} value={item[f.key]} icon={f.icon} label={f.label} hidden={f.hidden} />
+              ))}
             </div>
+            {item?.extra_notes && (
+              <p className="inset mt-3 px-3 py-2.5 text-[13px] text-[var(--ink-muted)] leading-relaxed whitespace-pre-wrap">{item.extra_notes}</p>
+            )}
+            {order.client_whatsapp && (
+              <button onClick={handleSendCreds} className="btn-accent w-full mt-3"><IconWhatsApp size={15} />Enviar credenciales por WhatsApp</button>
+            )}
           </div>
         )}
 
         {!hasCreds && order.status === 'pendiente_credenciales' && (
-          <div style={{ borderTop: '1px solid var(--surface-border)', padding: '8px 14px' }}>
-            <p style={{ fontSize: 12, color: 'var(--status-yellow)' }}>Esperando credenciales del proveedor.</p>
+          <div className="border-t border-[var(--surface-border)] px-4 py-2.5 flex items-center gap-2 text-[12.5px] text-[var(--b)]">
+            <span className="dot animate-pulse-soft" />Esperando que tu proveedor cargue las credenciales.
           </div>
         )}
-      </div>
+      </article>
 
-      {/* Modal: Editar datos del cliente */}
-      <Modal open={showEditClient} onClose={() => setShowEditClient(false)} title="Editar datos del cliente" maxWidth="max-w-sm">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-            Actualiza el nombre o numero de tu cliente. El proximo envio de credenciales usara el numero actualizado.
-          </p>
+      <Modal
+        open={showEditClient}
+        onClose={() => setShowEditClient(false)}
+        title="Datos del cliente"
+        subtitle="El próximo envío de credenciales usará estos datos."
+        maxWidth="max-w-sm"
+        footer={<>
+          <button onClick={() => setShowEditClient(false)} className="btn-ghost">Cancelar</button>
+          <button onClick={saveClientInfo} disabled={editSaving} className="btn-primary">{editSaving ? <Spinner size={15} /> : 'Guardar'}</button>
+        </>}
+      >
+        <div className="space-y-4">
           <div>
             <label className="label">Nombre del cliente</label>
-            <input className="input" placeholder="Nombre del cliente"
-              value={clientName} onChange={e => setClientName(e.target.value)} />
+            <input className="input" placeholder="María Pérez" value={clientName} onChange={e => setClientName(e.target.value)} />
           </div>
-          <PhoneInput
-            label="WhatsApp del cliente"
-            value={clientPhone}
-            onChange={setClientPhone}
-          />
+          <PhoneInput label="WhatsApp del cliente" value={clientPhone} onChange={setClientPhone} />
           {editError && <Alert type="error">{editError}</Alert>}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setShowEditClient(false)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-            <button onClick={saveClientInfo} disabled={editSaving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-              {editSaving ? <Spinner size={15} /> : 'Guardar'}
-            </button>
-          </div>
         </div>
       </Modal>
 
       {showSupport && (
-        <Modal open={true} onClose={() => setShowSupport(false)} title="Abrir ticket de soporte">
+        <Modal open onClose={() => setShowSupport(false)} title="Abrir ticket de soporte" subtitle={`${product?.name} · ${order.order_code}`}>
           <SupportForm order={order} onClose={() => setShowSupport(false)} />
         </Modal>
       )}

@@ -5,6 +5,10 @@ import { AuthProvider } from '@/context/AuthContext'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { CartProvider } from '@/context/CartContext'
 import AppRouter from '@/router/AppRouter'
+import { ToastProvider } from '@/components/ui/feedback'
+import ErrorBoundary from '@/components/ErrorBoundary'
+import '@fontsource-variable/geist'
+import '@fontsource-variable/geist-mono'
 import '@/styles/globals.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -13,7 +17,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <ThemeProvider>
         <AuthProvider>
           <CartProvider>
-            <AppRouter />
+            <ToastProvider>
+              <ErrorBoundary>
+                <AppRouter />
+              </ErrorBoundary>
+            </ToastProvider>
           </CartProvider>
         </AuthProvider>
       </ThemeProvider>

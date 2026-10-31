@@ -2,9 +2,12 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useSettings } from '@/hooks/useSettings'
-import { PageHeader, Modal, Alert, Spinner, EmptyState, Toggle } from '@/components/ui'
-import { IconPlus, IconEdit, IconTrash, IconBox, IconRefreshCw } from '@/assets/icons'
-import { formatUSD, getLogoPath, getDeliveryTypeLabel } from '@/utils'
+import { Link } from 'react-router-dom'
+import { PageHeader, Modal, Alert, Spinner, EmptyState, Toggle, Tabs, Badge, PageLoader, useToast, useConfirm } from '@/components/ui'
+import { getPlatformColor } from '@/utils/platform'
+import { ProductCover, normalizeCardStyle, CARD_FIT, CARD_POS, CARD_COLOR_USES } from '@/components/shared/ProductCard'
+import { IconPlus, IconEdit, IconTrash, IconBox, IconRefreshCw, IconSearch, IconDatabase } from '@/assets/icons'
+import { formatUSD, getDeliveryTypeLabel } from '@/utils'
 
 const DELIVERY_TYPES = [
   { value: 'cuenta_completa', label: 'Cuenta Completa' },
@@ -15,22 +18,84 @@ const DELIVERY_TYPES = [
   { value: 'otro', label: 'Otro (personalizado)' },
 ]
 
-function getPlatformColor(name = '') {
-  const n = name.toLowerCase()
-  if (n.includes('netflix')) return '#e50914'
-  if (n.includes('disney')) return '#006e99'
-  if (n.includes('hbo') || n.includes('max')) return '#5822b4'
-  if (n.includes('amazon') || n.includes('prime')) return '#ff9900'
-  if (n.includes('spotify')) return '#1db954'
-  if (n.includes('youtube')) return '#ff0000'
-  if (n.includes('crunchyroll')) return '#f47521'
-  if (n.includes('apple')) return '#555555'
-  if (n.includes('paramount')) return '#0064ff'
-  if (n.includes('movistar')) return '#019df4'
-  if (n.includes('claro')) return '#da291c'
-  if (n.includes('directv')) return '#00a8e0'
-  if (n.includes('deezer')) return '#a238ff'
-  return '#6b7280'
+const CARD_SWATCHES = ['#E50914', '#0063E5', '#1DB954', '#F47521', '#7C3AED', '#0D9488', '#DB2777', '#111827']
+
+/** Personalización de la tarjeta: ajuste de imagen, encuadre y color, con vista previa en vivo */
+function CardStyleEditor({ style, onChange, imageUrl, platformName, logoFilename, productName }) {
+  const st = normalizeCardStyle(style)
+  const set = patch => onChange({ ...st, ...patch })
+  const tint = getPlatformColor(platformName)
+  return (
+    <fieldset className="pt-5 border-t border-[var(--surface-border)]">
+      <legend className="eyebrow mb-3">Tarjeta en la tienda</legend>
+      <div className="grid sm:grid-cols-[1fr_200px] gap-4 items-start">
+        <div className="space-y-4 min-w-0">
+          <div>
+            <p className="label">Imagen</p>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(CARD_FIT).map(([k, v]) => (
+                <button key={k} type="button" onClick={() => set({ fit: k })} aria-pressed={st.fit === k} disabled={!imageUrl}
+                  className={`btn-secondary btn-sm !h-auto !py-2 !justify-start text-left !whitespace-normal ${st.fit === k ? 'is-down !border-[var(--a-line)]' : ''}`}>
+                  <span><span className="block text-[12.5px]">{v.label}</span><span className="block text-[10.5px] font-medium text-[var(--ink-faint)] leading-tight mt-0.5">{v.hint}</span></span>
+                </button>
+              ))}
+            </div>
+            {!imageUrl && <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Agrega una imagen para elegir cómo se muestra.</p>}
+          </div>
+
+          {imageUrl && st.fit === 'cover' && (
+            <div className="animate-fade-in">
+              <p className="label">Parte de la imagen que se conserva</p>
+              <div className="inset flex p-1 gap-1 w-fit">
+                {Object.entries(CARD_POS).map(([k, v]) => (
+                  <button key={k} type="button" onClick={() => set({ pos: k })} aria-pressed={st.pos === k}
+                    className={`px-3 h-8 rounded-[.55rem] text-xs font-semibold border transition-all ${st.pos === k ? 'bg-[var(--key)] text-[var(--ink)] border-[var(--surface-border-strong)] shadow-[inset_0_1px_0_var(--hl),0_2px_0_var(--key-edge)]' : 'border-transparent text-[var(--ink-faint)] hover:text-[var(--ink)]'}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="label">Color de la tarjeta</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => set({ color: null })} aria-pressed={!st.color}
+                className={`btn-secondary btn-sm ${!st.color ? 'is-down !border-[var(--a-line)]' : ''}`}>
+                <span className="w-4 h-4 rounded-full border border-[var(--surface-border-strong)]" style={{ background: tint }} />Automático
+              </button>
+              {CARD_SWATCHES.map(c => (
+                <button key={c} type="button" onClick={() => set({ color: c })} aria-label={`Color ${c}`} aria-pressed={st.color === c}
+                  className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${st.color === c ? 'border-[var(--ink)] scale-110' : 'border-[var(--surface-raised)]'}`}
+                  style={{ background: c, boxShadow: '0 2px 6px var(--shadow)' }} />
+              ))}
+              <label className="relative w-8 h-8 rounded-full cursor-pointer border-2 border-[var(--surface-raised)] overflow-hidden" title="Otro color" style={{ background: 'conic-gradient(from 90deg, #F43F5E, #F59E0B, #22C55E, #06B6D4, #6366F1, #D946EF, #F43F5E)', boxShadow: '0 2px 6px var(--shadow)' }}>
+                <input type="color" value={st.color || tint} onChange={e => set({ color: e.target.value.toUpperCase() })} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Elegir otro color" />
+              </label>
+            </div>
+            <p className="text-[11px] text-[var(--ink-faint)] mt-2 leading-relaxed">
+              {st.color ? <>Se usa en: {CARD_COLOR_USES.join(' · ').toLowerCase()}.</> : 'Automático usa el color de la plataforma (rojo para Netflix, azul para Disney+…).'}
+            </p>
+          </div>
+        </div>
+
+        {/* Vista previa en vivo */}
+        <div className="sm:sticky sm:top-0">
+          <div className={`product-card ${st.color ? 'has-color' : ''} pointer-events-none`} style={st.color ? { '--card-c': st.color } : undefined}>
+            <div className="relative">
+              <ProductCover key={imageUrl + st.fit} imageUrl={imageUrl} platformName={platformName} logoFilename={logoFilename} tint={tint} style={st} />
+              {platformName && <span className="absolute top-2 left-2 badge !h-5 !text-[10px] !bg-[var(--surface-raised)] !text-[var(--ink)]"><span className="dot" style={{ color: st.color || tint }} />{platformName}</span>}
+            </div>
+            <div className="p-3">
+              <p className="text-[12.5px] font-semibold text-[var(--ink)] truncate">{productName || 'Nombre del producto'}</p>
+              <div className="h-7 mt-2 rounded-lg bg-[var(--a-soft)] border border-[var(--a-line)]" />
+            </div>
+          </div>
+          <p className="text-[11px] text-[var(--ink-faint)] text-center mt-2">Así la verán tus distribuidores</p>
+        </div>
+      </div>
+    </fieldset>
+  )
 }
 
 function getDisplayPlatformName(product) {
@@ -42,42 +107,13 @@ function getDisplayDeliveryType(product) {
   return getDeliveryTypeLabel(product.delivery_type)
 }
 
-function ProductCardHeader({ imageUrl, logoFilename, platformName, accentColor }) {
-  const [imgErr, setImgErr] = useState(false)
-  const [logoErr, setLogoErr] = useState(false)
-  const logoPath = getLogoPath(logoFilename)
-  const showImage = imageUrl && !imgErr
-  return (
-    <div style={{ width: '100%', aspectRatio: '16 / 9', position: 'relative', overflow: 'hidden', flexShrink: 0, background: showImage ? `${accentColor}18` : `linear-gradient(135deg, ${accentColor}22 0%, ${accentColor}08 100%)` }}>
-      {showImage ? (
-        <>
-          <img src={imageUrl} alt={platformName} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} onError={() => setImgErr(true)} />
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%', background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.52)', backdropFilter: 'blur(6px)', borderRadius: 20, padding: '3px 8px 3px 4px' }}>
-            <div style={{ width: 18, height: 18, borderRadius: '50%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${accentColor}40` }}>
-              {logoPath && !logoErr ? <img src={logoPath} alt={platformName} style={{ width: 14, height: 14, objectFit: 'contain' }} onError={() => setLogoErr(true)} /> : <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{(platformName || '?')[0]}</span>}
-            </div>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)' }}>{platformName}</span>
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ position: 'absolute', width: '55%', height: '55%', borderRadius: '50%', background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)` }} />
-            <div style={{ width: 46, height: 46, borderRadius: 14, background: `${accentColor}20`, border: `1.5px solid ${accentColor}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
-              {logoPath && !logoErr ? <img src={logoPath} alt={platformName} style={{ width: 34, height: 34, objectFit: 'contain' }} onError={() => setLogoErr(true)} /> : <span style={{ fontSize: 19, fontWeight: 800, color: accentColor }}>{(platformName || '?')[0]}</span>}
-            </div>
-          </div>
-          <p style={{ position: 'absolute', bottom: 8, left: 10, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: `${accentColor}cc` }}>{platformName}</p>
-        </>
-      )}
-    </div>
-  )
-}
-
 export default function ProveedorProductos() {
   const { provider } = useAuth()
   const { settings } = useSettings()
+  const toast = useToast()
+  const confirm = useConfirm()
+  const [search, setSearch] = useState('')
+  const [view, setView] = useState('all')
   const rate = parseFloat(settings.exchange_rate) || 3.5
 
   const [products, setProducts] = useState([])
@@ -90,7 +126,7 @@ export default function ProveedorProductos() {
     delivery_type: 'perfil', custom_delivery_type: '',
     delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
     terms: '', warranty: '', what_includes: '', image_url: '',
-    is_renewable: false, renewal_price_pen: '',
+    is_renewable: false, renewal_price_pen: '', card_style: {},
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -128,7 +164,7 @@ export default function ProveedorProductos() {
       name: '', delivery_type: 'perfil', custom_delivery_type: '',
       delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
       terms: '', warranty: '', what_includes: '', image_url: '',
-      is_renewable: false, renewal_price_pen: '',
+      is_renewable: false, renewal_price_pen: '', card_style: {},
     })
     setError(''); setModal({ type: 'form' })
   }
@@ -146,6 +182,7 @@ export default function ProveedorProductos() {
       what_includes: p.what_includes || '', image_url: p.image_url || '',
       is_renewable: p.is_renewable || false,
       renewal_price_pen: p.renewal_price_usd ? (p.renewal_price_usd * rate).toFixed(2) : '',
+      card_style: normalizeCardStyle(p.card_style),
     })
     setError(''); setModal({ type: 'form', data: p })
   }
@@ -185,6 +222,10 @@ export default function ProveedorProductos() {
         is_renewable: form.is_renewable,
         renewal_price_usd: renewalPriceUsd,
       }
+      // El estilo de tarjeta solo se envía si se personalizó (requiere el SQL 007)
+      const cs = normalizeCardStyle(form.card_style)
+      const before = normalizeCardStyle(modal?.data?.card_style)
+      if (JSON.stringify(cs) !== JSON.stringify(before)) payload.card_style = cs
       if (modal?.data) {
         const { error: err } = await supabase.from('products').update(payload).eq('id', modal.data.id)
         if (err) throw err
@@ -193,232 +234,249 @@ export default function ProveedorProductos() {
         if (err) throw err
       }
       setModal(null); fetchProducts()
-    } catch (e) { setError(e.message) }
+      toast.success(modal?.data ? 'Producto actualizado' : 'Producto creado')
+    } catch (e) { setError(e.message?.includes('card_style') ? 'Falta ejecutar el SQL 007 (estilo de tarjeta) en Supabase.' : e.message) }
     setSaving(false)
   }
 
   async function toggleProduct(p) {
+    setProducts(prev => prev.map(x => x.id === p.id ? { ...x, is_active: !p.is_active } : x))
     await supabase.from('products').update({ is_active: !p.is_active }).eq('id', p.id)
-    fetchProducts()
+    toast(p.is_active ? `${p.name} oculto de la tienda` : `${p.name} visible en la tienda`)
   }
 
-  async function deleteProduct(id) {
-    if (!confirm('¿Eliminar este producto?')) return
-    const { error } = await supabase.from('products').delete().eq('id', id)
-    if (error) alert('Error: ' + error.message)
-    else fetchProducts()
+  async function deleteProduct(p) {
+    const ok = await confirm({ title: '¿Eliminar este producto?', message: `"${p.name}" se borrará junto con su stock y pedidos asociados. No se puede deshacer.`, danger: true, confirmText: 'Eliminar' })
+    if (!ok) return
+    const { error } = await supabase.from('products').delete().eq('id', p.id)
+    if (error) toast.error('Error: ' + error.message)
+    else { toast.success('Producto eliminado'); fetchProducts() }
   }
 
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={28} /></div>
+  if (loading) return <PageLoader variant="grid" />
+
+  const q = search.trim().toLowerCase()
+  const visibleProducts = products
+    .filter(p => view === 'all' || (view === 'on' ? p.is_active : !p.is_active))
+    .filter(p => !q || p.name.toLowerCase().includes(q) || getDisplayPlatformName(p).toLowerCase().includes(q))
+  const activeCount = products.filter(p => p.is_active).length
+  const DURATIONS = [7, 15, 30, 45, 60, 90]
 
   return (
     <div>
-      <PageHeader title="Productos" subtitle="Gestiona tu catálogo de streaming"
-        action={<button className="btn-primary" onClick={openCreate}><IconPlus size={15} />Nuevo producto</button>} />
+      <PageHeader title="Productos" subtitle={`${products.length} en tu catálogo · ${activeCount} visibles en la tienda`}
+        action={<button className="btn-primary" onClick={openCreate}><IconPlus size={16} />Nuevo producto</button>} />
 
       {products.length === 0 ? (
         <div className="card">
-          <EmptyState icon={IconBox} title="Sin productos" description="Crea tu primer producto."
-            action={<button className="btn-primary" onClick={openCreate}><IconPlus size={15} />Crear</button>} />
+          <EmptyState icon={IconBox} title="Crea tu primer producto" description="Define plataforma, precio y duración. Después sube su stock para venderlo."
+            action={<button className="btn-primary" onClick={openCreate}><IconPlus size={16} />Crear producto</button>} />
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }} className="stagger">
-          {products.map(p => {
-            const stock = stockCounts[p.id] || 0
-            const platformName = getDisplayPlatformName(p)
-            const accentColor = getPlatformColor(platformName)
-            return (
-              <div key={p.id} style={{ borderRadius: 14, border: '1px solid var(--surface-border)', overflow: 'hidden', opacity: p.is_active ? 1 : 0.5, display: 'flex', flexDirection: 'column', background: 'var(--surface-raised)', boxShadow: `inset 3px 0 0 ${accentColor}`, transition: 'box-shadow 0.2s, transform 0.18s' }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}, var(--shadow-elevated)`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = `inset 3px 0 0 ${accentColor}`; e.currentTarget.style.transform = '' }}
-              >
-                <ProductCardHeader imageUrl={p.image_url || null} logoFilename={p.platforms?.logo_filename} platformName={platformName} accentColor={accentColor} />
-                <div style={{ padding: '10px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                    <span className="badge badge-neutral" style={{ fontSize: 10 }}>{getDisplayDeliveryType(p)}</span>
-                    <span className={`badge ${p.delivery_mode === 'stock' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: 10 }}>
-                      {p.delivery_mode === 'stock' ? `Stock: ${stock}` : 'A pedido'}
-                    </span>
-                    {p.is_renewable && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 99, background: 'var(--status-green-bg)', color: 'var(--status-green)', border: '1px solid var(--status-green-border)' }}>
-                        <IconRefreshCw size={9} />Renovable
-                      </span>
-                    )}
+        <>
+          <div className="flex flex-col sm:flex-row gap-3 mb-5">
+            <label className="relative flex-1">
+              <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)] pointer-events-none" />
+              <input className="input input-icon" placeholder="Buscar producto o plataforma" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar productos" />
+            </label>
+            <Tabs tabs={[
+              { label: 'Todos', value: 'all', count: products.length },
+              { label: 'Visibles', value: 'on', count: activeCount },
+              { label: 'Ocultos', value: 'off', count: products.length - activeCount },
+            ]} active={view} onChange={setView} />
+          </div>
+
+          <div className="grid gap-4 grid-cols-1 min-[520px]:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 stagger">
+            {visibleProducts.map(p => {
+              const stock = stockCounts[p.id] || 0
+              const platformName = getDisplayPlatformName(p)
+              const isStock = p.delivery_mode === 'stock'
+              const renewDiff = p.is_renewable && p.renewal_price_usd && parseFloat(p.renewal_price_usd) !== parseFloat(p.price_usd)
+              return (
+                <article key={p.id} className={`product-card group flex flex-col ${p.is_active ? '' : 'opacity-60'}`}>
+                  <div className="relative">
+                    <ProductCover className="!aspect-[2/1]" style={p.card_style} imageUrl={p.image_url} platformName={platformName} logoFilename={p.custom_platform_name ? null : p.platforms?.logo_filename} tint={getPlatformColor(platformName)} />
+                    {!p.is_active && <span className="absolute top-3 left-3 badge !bg-[var(--surface-raised)]">Oculto</span>}
                   </div>
-                  <div>
-                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--ink)' }}>{formatUSD(p.price_usd)}</p>
-                    <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>≈ S/ {(p.price_usd * rate).toFixed(2)} · {p.duration_days}d</p>
-                    {p.is_renewable && p.renewal_price_usd && parseFloat(p.renewal_price_usd) !== parseFloat(p.price_usd) && (
-                      <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <IconRefreshCw size={9} />Renov. {formatUSD(p.renewal_price_usd)} ≈ S/ {(p.renewal_price_usd * rate).toFixed(2)}
-                      </p>
-                    )}
-                  </div>
-                  <div style={{ height: 1, background: 'var(--surface-border)', margin: '0 -14px' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <button onClick={() => openEdit(p)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center', fontSize: 12, padding: '7px 10px' }}>
-                      <IconEdit size={13} />Editar
-                    </button>
+                  <div className="p-4 flex flex-col gap-4 flex-1">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-[14.5px] text-[var(--ink)] leading-snug line-clamp-2">{p.name}</h3>
+                      <p className="text-xs text-[var(--ink-muted)] mt-0.5">{platformName} · {getDisplayDeliveryType(p)} · {p.duration_days} días</p>
+                    </div>
                     <Toggle checked={p.is_active} onChange={() => toggleProduct(p)} />
-                    <button onClick={() => deleteProduct(p.id)} className="btn-ghost" style={{ padding: '7px 9px', color: 'var(--status-red)' }}>
-                      <IconTrash size={13} />
-                    </button>
                   </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-xl text-[var(--ink)] leading-none">{formatUSD(p.price_usd)}</p>
+                      <p className="text-[11px] text-[var(--ink-faint)] mt-1">S/ {(p.price_usd * rate).toFixed(2)}{renewDiff ? ` · renueva ${formatUSD(p.renewal_price_usd)}` : ''}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5">
+                      {isStock
+                        ? <Badge color={stock === 0 ? 'red' : stock < 3 ? 'yellow' : 'green'} dot>{stock === 0 ? 'Sin stock' : `${stock} en stock`}</Badge>
+                        : <Badge color="violet">A pedido{p.stock_qty > 0 ? ` · ${p.stock_qty}` : p.stock_qty === 0 ? ' · agotado' : ''}</Badge>}
+                      {p.is_renewable && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--b)]"><IconRefreshCw size={11} />Renovable</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-3 border-t border-[var(--surface-border)]">
+                    <button onClick={() => openEdit(p)} className="btn-secondary btn-sm flex-1"><IconEdit size={13} />Editar</button>
+                    {isStock && <Link to="/proveedor/stock" state={{ productId: p.id }} className="btn-secondary btn-sm flex-1"><IconDatabase size={13} />Stock</Link>}
+                    <button onClick={() => deleteProduct(p)} className="btn-secondary btn-sm btn-icon hover:!text-[var(--status-red)]" aria-label="Eliminar producto"><IconTrash size={14} /></button>
+                  </div>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+          {visibleProducts.length === 0 && <div className="card mt-2"><EmptyState icon={IconBox} title="Sin resultados" description="Prueba con otro nombre o filtro." /></div>}
+        </>
       )}
 
-      <Modal open={modal?.type === 'form'} onClose={() => setModal(null)} title={modal?.data ? 'Editar producto' : 'Nuevo producto'} maxWidth="max-w-lg">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingRight: 4, paddingBottom: 4 }}>
-
-          {/* Plataforma */}
-          <div>
-            <label className="label">Plataforma *</label>
-            <select className="input" value={form.platform_id} onChange={e => setForm(f => ({ ...f, platform_id: e.target.value, custom_platform_name: '' }))}>
-              <option value="">Seleccionar...</option>
-              {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              <option value="__custom__">✏️ Escribir manualmente...</option>
-            </select>
-            {isCustomPlatform && (
-              <input className="input" style={{ marginTop: 8 }} placeholder="Ej: Windows, Autodesk, Canva Pro..."
-                value={form.custom_platform_name} onChange={e => setForm(f => ({ ...f, custom_platform_name: e.target.value }))} autoFocus />
-            )}
-          </div>
-
-          {/* Tipo */}
-          <div>
-            <label className="label">Tipo *</label>
-            <select className="input" value={form.delivery_type} onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value, custom_delivery_type: '' }))}>
-              {DELIVERY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-            {isCustomType && (
-              <input className="input" style={{ marginTop: 8 }} placeholder="Ej: Licencia, Membresía, Acceso..."
-                value={form.custom_delivery_type} onChange={e => setForm(f => ({ ...f, custom_delivery_type: e.target.value }))} autoFocus />
-            )}
-          </div>
-
-          <div>
-            <label className="label">Nombre del producto *</label>
-            <input className="input" placeholder="Ej: Netflix Perfil HD 30 días" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-          </div>
-
-          <div>
-            <label className="label">Imagen <span style={{ fontWeight: 400, color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>URL opcional</span></label>
-            <input className="input" placeholder="https://i.postimg.cc/tu-imagen.png" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Si no pones URL se usa el logo de la plataforma</p>
-            {form.image_url && (
-              <div style={{ marginTop: 8, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--surface-border)', aspectRatio: '16/9', background: 'var(--surface-overlay)' }}>
-                <img src={form.image_url} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={e => { e.target.parentElement.style.display = 'none' }} />
+      <Modal
+        open={modal?.type === 'form'}
+        onClose={() => setModal(null)}
+        title={modal?.data ? 'Editar producto' : 'Nuevo producto'}
+        maxWidth="max-w-xl"
+        footer={<>
+          <button onClick={() => setModal(null)} className="btn-ghost">Cancelar</button>
+          <button onClick={save} disabled={saving} className="btn-primary min-w-[130px]">{saving ? <Spinner size={15} /> : 'Guardar'}</button>
+        </>}
+      >
+        <div className="space-y-5">
+          <fieldset className="space-y-4">
+            <legend className="eyebrow mb-3">Qué vendes</legend>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Plataforma</label>
+                <select className="input" value={form.platform_id} onChange={e => setForm(f => ({ ...f, platform_id: e.target.value, custom_platform_name: '' }))}>
+                  <option value="">Seleccionar...</option>
+                  {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  <option value="__custom__">Otra (escribir)...</option>
+                </select>
+                {isCustomPlatform && (
+                  <input className="input mt-2" placeholder="Ej: Windows, Autodesk..." value={form.custom_platform_name} onChange={e => setForm(f => ({ ...f, custom_platform_name: e.target.value }))} autoFocus />
+                )}
               </div>
-            )}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div>
-              <label className="label">Precio en S/ Soles *</label>
-              <input type="number" step="0.10" min="0" className="input" placeholder="0.00" value={form.price_pen} onChange={e => setForm(f => ({ ...f, price_pen: e.target.value }))} />
-              {form.price_pen > 0 && <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 4 }}>= {formatUSD(usdFromForm)} (TC: S/{rate})</p>}
+              <div>
+                <label className="label">Tipo</label>
+                <select className="input" value={form.delivery_type} onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value, custom_delivery_type: '' }))}>
+                  {DELIVERY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                {isCustomType && (
+                  <input className="input mt-2" placeholder="Ej: Licencia, Membresía..." value={form.custom_delivery_type} onChange={e => setForm(f => ({ ...f, custom_delivery_type: e.target.value }))} autoFocus />
+                )}
+              </div>
             </div>
-<div>
-  <label className="label">Duración (días)</label>
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 4, marginBottom: 8 }}>
-    {[7, 15, 30, 45, 60, 90].map(d => (
-      <button key={d} type="button" onClick={() => setForm(f => ({ ...f, duration_days: d }))}
-        style={{
-          padding: '5px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
-          cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', textAlign: 'center',
-          background: form.duration_days === d ? 'var(--ink)' : 'var(--surface-overlay)',
-          color: form.duration_days === d ? 'var(--surface)' : 'var(--ink-muted)',
-          border: `1px solid ${form.duration_days === d ? 'var(--ink)' : 'var(--surface-border)'}`,
-        }}>
-        {d}d
-      </button>
-    ))}
-  </div>
-  <input type="number" min="1" className="input"
-    placeholder="Personalizado"
-    value={form.duration_days}
-    onChange={e => setForm(f => ({ ...f, duration_days: parseInt(e.target.value) || 30 }))} />
-</div>
-          </div>
+            <div>
+              <label className="label">Nombre del producto</label>
+              <input className="input" placeholder="Netflix perfil HD 30 días" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Imagen (URL opcional)</label>
+              <input className="input" placeholder="https://i.postimg.cc/tu-imagen.png" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value.trim() }))} />
+              <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Usa el enlace directo (termina en .png, .jpg o .webp). Si la dejas vacía se usa el logo de la plataforma.</p>
+            </div>
+          </fieldset>
 
-          <div>
-            <label className="label">Modo de entrega</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {[{ value: 'stock', label: 'En Stock', sub: 'Entrega automática' }, { value: 'pedido', label: 'A Pedido', sub: 'Entrega manual' }].map(m => (
+          <CardStyleEditor
+            style={form.card_style}
+            onChange={card_style => setForm(f => ({ ...f, card_style }))}
+            imageUrl={form.image_url}
+            platformName={form.custom_platform_name || platforms.find(x => x.id === form.platform_id)?.name || ''}
+            logoFilename={isCustomPlatform ? null : platforms.find(x => x.id === form.platform_id)?.logo_filename}
+            productName={form.name}
+          />
+
+          <fieldset className="space-y-4 pt-5 border-t border-[var(--surface-border)]">
+            <legend className="eyebrow mb-3">Precio y duración</legend>
+            <div>
+              <label className="label">Precio en soles</label>
+              <label className="inset flex items-center gap-2 px-3.5 focus-within:border-[var(--a)]">
+                <span className="font-mono text-[var(--ink-faint)]">S/</span>
+                <input type="number" inputMode="decimal" step="0.10" min="0" className="flex-1 min-w-0 bg-transparent outline-none font-mono text-lg py-2.5 text-[var(--ink)]" placeholder="0.00" value={form.price_pen} onChange={e => setForm(f => ({ ...f, price_pen: e.target.value }))} aria-label="Precio en soles" />
+                {form.price_pen > 0 && <span className="text-xs font-mono text-[var(--a)]">= {formatUSD(usdFromForm)}</span>}
+              </label>
+              <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Tipo de cambio: S/ {rate}</p>
+            </div>
+            <div>
+              <label className="label">Duración</label>
+              <div className="flex flex-wrap gap-1.5">
+                {DURATIONS.map(d => (
+                  <button key={d} type="button" onClick={() => setForm(f => ({ ...f, duration_days: d }))} className={`btn-secondary btn-sm min-w-[56px] ${form.duration_days === d ? 'is-down !text-[var(--a)]' : ''}`}>{d} d</button>
+                ))}
+                <label className={`inset flex items-center gap-1.5 px-3 h-9 ${!DURATIONS.includes(form.duration_days) ? '!border-[var(--a)]' : ''}`}>
+                  <input type="number" min="1" className="w-14 bg-transparent outline-none font-mono text-sm text-[var(--ink)]" value={form.duration_days} onChange={e => setForm(f => ({ ...f, duration_days: parseInt(e.target.value) || 30 }))} aria-label="Duración personalizada" />
+                  <span className="text-xs text-[var(--ink-faint)]">días</span>
+                </label>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-4 pt-5 border-t border-[var(--surface-border)]">
+            <legend className="eyebrow mb-3">Entrega</legend>
+            <div className="grid grid-cols-2 gap-2.5">
+              {[{ value: 'stock', label: 'En stock', sub: 'Se entrega al instante' }, { value: 'pedido', label: 'A pedido', sub: 'Cargas las credenciales después' }].map(m => (
                 <button key={m.value} type="button" onClick={() => setForm(f => ({ ...f, delivery_mode: m.value }))}
-                  style={{ padding: '10px 14px', borderRadius: 10, textAlign: 'left', cursor: 'pointer', border: form.delivery_mode === m.value ? '2px solid var(--ink)' : '1px solid var(--surface-border)', background: form.delivery_mode === m.value ? 'var(--surface-overlay)' : 'var(--surface-raised)' }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{m.label}</p>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{m.sub}</p>
+                  className={`btn-secondary !h-auto !py-3 !justify-start text-left !whitespace-normal ${form.delivery_mode === m.value ? 'is-down !border-[var(--a-line)]' : ''}`}>
+                  <span className="dot flex-shrink-0" style={{ color: form.delivery_mode === m.value ? 'var(--a)' : 'var(--surface-border-strong)' }} />
+                  <span><span className="block text-sm">{m.label}</span><span className="block text-[11px] font-medium text-[var(--ink-faint)]">{m.sub}</span></span>
                 </button>
               ))}
             </div>
-          </div>
-
-          {form.delivery_mode === 'pedido' && (
-            <div>
-              <label className="label">Disponibilidad (opcional)</label>
-              <input type="number" min="0" className="input" placeholder="Ej: 5 — dejar vacío para sin límite" value={form.stock_qty} onChange={e => setForm(f => ({ ...f, stock_qty: e.target.value }))} />
-              <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4, lineHeight: 1.5 }}>Vacío = sin límite · <strong>0</strong> = agotado · <strong>N</strong> = muestra "Pedido: N"</p>
-            </div>
-          )}
-
-          <div>
-            <label className="label">Términos y condiciones</label>
-            <textarea className="input" rows={2} placeholder="Condiciones del producto..." value={form.terms} onChange={e => setForm(f => ({ ...f, terms: e.target.value }))} style={{ resize: 'none' }} />
-          </div>
-          <div>
-            <label className="label">Garantía</label>
-            <textarea className="input" rows={2} placeholder="Descripción de la garantía..." value={form.warranty} onChange={e => setForm(f => ({ ...f, warranty: e.target.value }))} style={{ resize: 'none' }} />
-          </div>
-          <div>
-            <label className="label">¿Qué incluye?</label>
-            <textarea className="input" rows={2} placeholder="Descripción del contenido..." value={form.what_includes} onChange={e => setForm(f => ({ ...f, what_includes: e.target.value }))} style={{ resize: 'none' }} />
-          </div>
-
-          {/* ── RENOVACIÓN — al final para no bloquear el scroll ── */}
-          <div style={{ borderRadius: 12, border: `2px solid ${form.is_renewable ? 'var(--status-green-border)' : 'var(--surface-border)'}`, overflow: 'hidden', transition: 'border-color 0.2s' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: form.is_renewable ? 'var(--status-green-bg)' : 'var(--surface-overlay)', cursor: 'pointer', userSelect: 'none' }}
-              onClick={() => setForm(f => ({ ...f, is_renewable: !f.is_renewable, renewal_price_pen: !f.is_renewable ? f.price_pen : '' }))}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 30, height: 30, borderRadius: 9, background: form.is_renewable ? 'var(--status-green)' : 'var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', flexShrink: 0 }}>
-                  <IconRefreshCw size={15} style={{ color: form.is_renewable ? '#fff' : 'var(--ink-faint)' }} />
-                </div>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: form.is_renewable ? 'var(--status-green)' : 'var(--ink)' }}>Producto renovable</p>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>Activa para configurar precio de renovación</p>
-                </div>
-              </div>
-              <div style={{ width: 42, height: 24, borderRadius: 99, background: form.is_renewable ? 'var(--status-green)' : 'var(--surface-border)', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
-                <div style={{ position: 'absolute', top: 4, left: form.is_renewable ? 22 : 4, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
-              </div>
-            </div>
-            {form.is_renewable && (
-              <div style={{ padding: '12px 14px', borderTop: `1px solid var(--status-green-border)`, background: 'var(--surface-raised)' }}>
-                <label className="label">Precio de renovación en S/ Soles</label>
-                <input type="number" step="0.10" min="0" className="input"
-                  placeholder={`Dejar vacío = mismo precio (S/ ${form.price_pen || '0.00'})`}
-                  value={form.renewal_price_pen}
-                  onChange={e => setForm(f => ({ ...f, renewal_price_pen: e.target.value }))} />
-                {form.renewal_price_pen > 0
-                  ? <p style={{ fontSize: 11, color: 'var(--status-green)', marginTop: 4 }}>= {formatUSD(renewalUsdFromForm)} (TC: S/{rate})</p>
-                  : <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Si lo dejas vacío, el precio de renovación será igual al precio base</p>
-                }
+            {form.delivery_mode === 'pedido' && (
+              <div className="animate-fade-in">
+                <label className="label">Cupos disponibles (opcional)</label>
+                <input type="number" min="0" className="input" placeholder="Vacío = sin límite" value={form.stock_qty} onChange={e => setForm(f => ({ ...f, stock_qty: e.target.value }))} />
+                <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Vacío = sin límite · 0 = agotado · un número = cupos que verá el distribuidor.</p>
               </div>
             )}
-          </div>
+          </fieldset>
+
+          <fieldset className="space-y-3 pt-5 border-t border-[var(--surface-border)]">
+            <div className={`rounded-2xl border transition-colors ${form.is_renewable ? 'border-[var(--b-line)] bg-[var(--b-soft)]' : 'border-[var(--surface-border)]'}`}>
+              <div className="flex items-center justify-between gap-3 p-3.5">
+                <div className="flex items-center gap-3">
+                  <span className={`w-9 h-9 rounded-xl grid place-items-center ${form.is_renewable ? 'bg-[var(--b)] text-white' : 'inset text-[var(--ink-faint)]'}`}><IconRefreshCw size={16} /></span>
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--ink)]">Producto renovable</p>
+                    <p className="text-[11px] text-[var(--ink-muted)]">El distribuidor puede pedir renovarlo</p>
+                  </div>
+                </div>
+                <Toggle checked={form.is_renewable} onChange={v => setForm(f => ({ ...f, is_renewable: v, renewal_price_pen: v ? f.price_pen : '' }))} />
+              </div>
+              {form.is_renewable && (
+                <div className="px-3.5 pb-3.5 animate-fade-in">
+                  <label className="label">Precio de renovación en soles</label>
+                  <input type="number" step="0.10" min="0" className="input" placeholder={`Vacío = mismo precio (S/ ${form.price_pen || '0.00'})`} value={form.renewal_price_pen} onChange={e => setForm(f => ({ ...f, renewal_price_pen: e.target.value }))} />
+                  {form.renewal_price_pen > 0 && <p className="text-[11px] font-mono text-[var(--b)] mt-1.5">= {formatUSD(renewalUsdFromForm)}</p>}
+                </div>
+              )}
+            </div>
+          </fieldset>
+
+          <details className="group pt-5 border-t border-[var(--surface-border)]" open={!!(form.terms || form.warranty || form.what_includes)}>
+            <summary className="eyebrow cursor-pointer list-none flex items-center justify-between">
+              Detalles para el distribuidor <span className="transition-transform group-open:rotate-180">⌄</span>
+            </summary>
+            <div className="space-y-3 mt-4">
+              <div>
+                <label className="label">¿Qué incluye?</label>
+                <textarea className="input" rows={2} placeholder="1 perfil personal · HD" value={form.what_includes} onChange={e => setForm(f => ({ ...f, what_includes: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Términos y condiciones</label>
+                <textarea className="input" rows={2} placeholder="No cambiar la contraseña..." value={form.terms} onChange={e => setForm(f => ({ ...f, terms: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Garantía</label>
+                <textarea className="input" rows={2} placeholder="Garantía por todo el periodo..." value={form.warranty} onChange={e => setForm(f => ({ ...f, warranty: e.target.value }))} />
+              </div>
+            </div>
+          </details>
 
           {error && <Alert type="error">{error}</Alert>}
-          <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
-            <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-            <button onClick={save} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-              {saving ? <Spinner size={15} /> : 'Guardar'}
-            </button>
-          </div>
         </div>
       </Modal>
     </div>

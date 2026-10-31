@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { applyBrand } from '@/lib/brand'
 
 const AuthContext = createContext(null)
 
@@ -10,6 +11,12 @@ export function AuthProvider({ children }) {
   const [provider, setProvider] = useState(null)
   const [loading, setLoading] = useState(true)
   const fetchingRef = useRef(false)
+  const currentUserRef = useRef(null) // usuario cuya sesión está vigente
+
+  // Colores: el distribuidor puede elegir los suyos; si no, usa los de su proveedor.
+  // El proveedor usa los de su tienda y el admin los de la plataforma.
+  const ownAccent = profile?.role === 'distribuidor' ? profile?.ui_accent : null
+  useEffect(() => { applyBrand(ownAccent || provider?.brand_accent) }, [ownAccent, provider?.brand_accent])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -26,6 +33,7 @@ export function AuthProvider({ children }) {
       if (event === 'TOKEN_REFRESHED') return
 
       if (event === 'SIGNED_OUT') {
+        currentUserRef.current = null
         setSession(null)
         setProfile(null)
         setProvider(null)
@@ -36,6 +44,9 @@ export function AuthProvider({ children }) {
 
       if (event === 'SIGNED_IN' && session?.user) {
         setSession(session)
+        // Usuario nuevo en esta pestaña: mostrar carga hasta tener perfil Y proveedor
+        // (evita el destello de "Servicio suspendido" al cambiar de cuenta)
+        if (currentUserRef.current !== session.user.id) setLoading(true)
         fetchingRef.current = false
         fetchProfile(session.user.id)
       }
@@ -45,8 +56,10 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(userId) {
-    if (fetchingRef.current) return
+    if (fetchingRef.current && currentUserRef.current === userId) return
     fetchingRef.current = true
+    currentUserRef.current = userId
+    const stale = () => currentUserRef.current !== userId
     try {
       const { data: profileData, error } = await supabase
         .from('users')
@@ -54,25 +67,31 @@ export function AuthProvider({ children }) {
         .eq('id', userId)
         .maybeSingle()
 
+      if (stale()) return
       if (error) { console.error('fetchProfile error:', error); return }
       if (!profileData) { console.warn('No profile found for', userId); return }
 
-      setProfile(profileData)
-
+      // Se cargan perfil y proveedor y se publican juntos, nunca uno sin el otro
+      let prov = null
       if (profileData.role === 'proveedor') {
-        const { data: prov } = await supabase
+        const { data } = await supabase
           .from('providers').select('*').eq('user_id', userId).maybeSingle()
-        setProvider(prov)
+        prov = data
       } else if (profileData.role === 'distribuidor' && profileData.provider_id) {
-        const { data: prov } = await supabase
+        const { data } = await supabase
           .from('providers').select('*').eq('id', profileData.provider_id).maybeSingle()
-        setProvider(prov)
+        prov = data
       }
+      if (stale()) return
+      setProvider(prov)
+      setProfile(profileData)
     } catch (err) {
       console.error('Error fetching profile:', err)
     } finally {
-      setLoading(false)
-      fetchingRef.current = false
+      if (!stale()) {
+        setLoading(false)
+        fetchingRef.current = false
+      }
     }
   }
 
@@ -127,9 +146,10 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
-    await supabase.auth.signOut()
+    currentUserRef.current = null
     setProfile(null)
     setProvider(null)
+    await supabase.auth.signOut()
   }
 
   async function refreshProfile() {

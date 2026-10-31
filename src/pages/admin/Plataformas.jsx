@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { PageHeader, Modal, Alert, Spinner, Toggle } from '@/components/ui'
+import { PageHeader, Modal, Alert, Spinner, Toggle, SkeletonGrid } from '@/components/ui'
+import { PlatformLogo } from '@/utils/platform'
 import { IconPlus, IconEdit, IconMonitor } from '@/assets/icons'
-import { getLogoPath } from '@/utils'
 
 export default function AdminPlataformas() {
   const [platforms, setPlatforms] = useState([])
@@ -54,23 +54,20 @@ export default function AdminPlataformas() {
         }
       />
 
-      {loading ? <div className="flex justify-center py-20"><Spinner size={32} /></div> : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 stagger">
+      {loading ? <SkeletonGrid count={10} height={150} /> : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3 stagger">
           {platforms.map(p => (
-            <div key={p.id} className={`card p-4 flex flex-col items-center gap-2 text-center relative ${!p.is_active ? 'opacity-40' : ''}`}>
-              <div className="w-14 h-14 rounded-xl bg-[var(--surface-overlay)] flex items-center justify-center overflow-hidden">
-                <img src={getLogoPath(p.logo_filename)} alt={p.name}
-                  className="w-12 h-12 object-contain"
-                  onError={e => { e.target.style.display = 'none' }} />
+            <article key={p.id} className={`card card-hover p-4 flex flex-col items-center gap-2.5 text-center ${!p.is_active ? 'opacity-50' : ''}`}>
+              <PlatformLogo name={p.name} filename={p.logo_filename} size={56} />
+              <div className="min-w-0 w-full">
+                <p className="text-[13px] font-semibold text-[var(--ink)] leading-tight truncate">{p.name}</p>
+                <p className="text-[10.5px] font-mono text-[var(--ink-faint)] truncate">{p.logo_filename}</p>
               </div>
-              <p className="text-xs font-semibold text-[var(--ink)] leading-tight">{p.name}</p>
-              <p className="text-[10px] font-mono text-[var(--ink-faint)]">{p.logo_filename}</p>
-              <div className="flex gap-1 mt-1">
-                <button onClick={() => { setForm({ name: p.name, logo_filename: p.logo_filename }); setModal({ type: 'form', data: p }) }}
-                  className="btn-ghost p-1.5 text-xs"><IconEdit size={13} /></button>
+              <div className="flex items-center gap-2 mt-1">
+                <button onClick={() => { setForm({ name: p.name, logo_filename: p.logo_filename }); setModal({ type: 'form', data: p }) }} className="btn-secondary btn-sm btn-icon" aria-label={`Editar ${p.name}`}><IconEdit size={13} /></button>
                 <Toggle checked={p.is_active} onChange={() => togglePlatform(p)} />
               </div>
-            </div>
+            </article>
           ))}
         </div>
       )}
@@ -87,9 +84,8 @@ export default function AdminPlataformas() {
             <p className="text-xs text-[var(--ink-faint)] mt-1">El archivo debe estar en /public/logos/</p>
           </div>
           {form.logo_filename && (
-            <div className="flex items-center gap-3 bg-[var(--surface-overlay)] p-3 rounded-xl">
-              <img src={getLogoPath(form.logo_filename)} alt="Preview" className="w-10 h-10 object-contain rounded-lg"
-                onError={e => { e.target.src = '' }} />
+            <div className="flex items-center gap-3 inset p-3">
+              <PlatformLogo key={form.logo_filename} name={form.name} filename={form.logo_filename} size={44} />
               <span className="text-sm text-[var(--ink-muted)]">Vista previa</span>
             </div>
           )}

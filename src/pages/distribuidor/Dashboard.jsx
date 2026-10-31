@@ -3,9 +3,11 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useBalance } from '@/hooks/useBalance'
 import { useSettings } from '@/hooks/useSettings'
-import { PageHeader, EmptyState, Spinner, Tabs, StatCard } from '@/components/ui'
+import { Link } from 'react-router-dom'
+import { PageHeader, EmptyState, PageLoader, Tabs, StatCard } from '@/components/ui'
 import OrderCard from '@/components/shared/OrderCard'
-import { IconBox, IconDollar, IconCheck, IconClock, IconSearch } from '@/assets/icons'
+import ExpiringSoon from '@/components/shared/ExpiringSoon'
+import { IconBox, IconDollar, IconCheck, IconClock, IconSearch, IconStore, IconX } from '@/assets/icons'
 import { formatUSD } from '@/utils'
 
 export default function DistDashboard() {
@@ -26,7 +28,7 @@ export default function DistDashboard() {
 
   useEffect(() => {
     if (!profile) return
-    const channel = supabase.channel('orders-rt-' + profile.id)
+    const channel = supabase.channel(`orders-rt-${profile.id}-${Math.random().toString(36).slice(2, 8)}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'stock_items' }, fetchOrders)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `distributor_id=eq.${profile.id}` }, fetchOrders)
       .subscribe()
@@ -103,64 +105,60 @@ export default function DistDashboard() {
       })
     : byTab
 
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={28} /></div>
+  if (loading) return <PageLoader />
+
+  const soon = orders.filter(o => o.status === 'activo' && o.expires_at && (new Date(o.expires_at) - new Date()) / 86400000 <= 3).length
 
   return (
     <div>
-      <PageHeader title="Mis pedidos" subtitle="Gestiona tus suscripciones y credenciales" />
+      <PageHeader
+        title="Mis"
+        accent="pedidos"
+        subtitle="Credenciales, vencimientos y avisos a tus clientes"
+        action={<Link to="/tienda" className="btn-primary"><IconStore size={16} />Ir a la tienda</Link>}
+      />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }} className="stagger">
-        <StatCard label="Saldo" value={formatUSD(balance)} icon={IconDollar} color="green" />
-        <StatCard label="Activos" value={stats.active} icon={IconCheck} color={stats.active > 0 ? 'green' : 'neutral'} />
-        <StatCard label="Pendientes" value={stats.pending} icon={IconClock} color={stats.pending > 0 ? 'yellow' : 'neutral'} />
-        <StatCard label="Expirados" value={stats.expired} icon={IconBox} color="neutral" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 stagger">
+        <StatCard label="Activos" value={stats.active} icon={IconCheck} color="green" />
+        <StatCard label="Por vencer" value={soon} icon={IconClock} color={soon > 0 ? 'yellow' : 'neutral'} highlight={soon > 0} sub={soon > 0 ? 'Avisa a tus clientes hoy' : 'Todo al día'} />
+        <StatCard label="Pendientes" value={stats.pending} icon={IconBox} color={stats.pending > 0 ? 'violet' : 'neutral'} />
+        <StatCard label="Expirados" value={stats.expired} icon={IconX} color="neutral" sub="renuévalos para no perder al cliente" />
       </div>
 
-      <div style={{ marginBottom: 12 }}>
+      <ExpiringSoon orders={orders} exchangeRate={exchangeRate} />
+
+      <div className="flex flex-col lg:flex-row gap-3 mb-4">
         <Tabs
           tabs={[
             { label: 'Activos', value: 'activo', count: stats.active },
             { label: 'Pendientes', value: 'pendiente_credenciales', count: stats.pending },
-            { label: 'Expirados', value: 'expirado' },
-            { label: 'Todos', value: 'all' },
+            { label: 'Expirados', value: 'expirado', count: stats.expired },
+            { label: 'Todos', value: 'all', count: orders.length },
           ]}
           active={tab} onChange={v => { setTab(v); setSearch('') }}
         />
-      </div>
-
-      <div style={{ position: 'relative', marginBottom: 14 }}>
-        <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
-        <input className="input" style={{ paddingLeft: 36 }}
-          placeholder="Buscar por cliente, plataforma, correo, codigo..."
-          value={search} onChange={e => setSearch(e.target.value)} />
-        {search && (
-          <button onClick={() => setSearch('')}
-            style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 16, lineHeight: 1 }}>
-            x
-          </button>
-        )}
+        <label className="relative flex-1">
+          <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)] pointer-events-none" />
+          <input className="input input-icon" placeholder="Buscar cliente, plataforma, correo o código" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar pedidos" />
+          {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 btn-ghost p-1.5" aria-label="Limpiar búsqueda"><IconX size={14} /></button>}
+        </label>
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState icon={IconBox}
-          title={search ? 'Sin resultados' : 'Sin pedidos'}
-          description={search ? `No hay pedidos que coincidan con "${search}".` : tab === 'activo' ? 'No tienes suscripciones activas. Ve a la tienda para comprar.' : 'No hay pedidos en esta categoria.'} />
+        <div className="card">
+          <EmptyState
+            icon={IconBox}
+            title={search ? 'Sin resultados' : tab === 'activo' ? 'Aún no tienes pedidos activos' : 'Nada por aquí'}
+            description={search ? `No hay pedidos que coincidan con "${search}".` : tab === 'activo' ? 'Cuando compres en la tienda, tus credenciales aparecerán aquí.' : 'No hay pedidos en esta categoría.'}
+            action={!search && tab === 'activo' ? <Link to="/tienda" className="btn-primary">Ir a la tienda</Link> : null}
+          />
+        </div>
       ) : (
         <>
-          {search && (
-            <p style={{ fontSize: 12, color: 'var(--ink-faint)', marginBottom: 10 }}>
-              {filtered.length} resultado{filtered.length !== 1 ? 's' : ''} para "{search}"
-            </p>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
+          {search && <p className="text-xs text-[var(--ink-faint)] mb-3">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''} para "{search}"</p>}
+          <div className="flex flex-col gap-3 stagger">
             {filtered.map(order => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                template={template}
-                exchangeRate={exchangeRate}
-                onCredentialsUpdated={fetchOrders}
-              />
+              <OrderCard key={order.id} order={order} template={template} exchangeRate={exchangeRate} onCredentialsUpdated={fetchOrders} />
             ))}
           </div>
         </>

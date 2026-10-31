@@ -1,41 +1,25 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCart } from '@/context/CartContext'
-import { useAuth } from '@/context/AuthContext'
 import { useBalance } from '@/hooks/useBalance'
 import { useSettings } from '@/hooks/useSettings'
 import { supabase } from '@/lib/supabase'
-import { PageHeader, Modal, Alert, Spinner } from '@/components/ui'
+import { PageHeader, Modal, Alert, Spinner, EmptyState } from '@/components/ui'
+import { PlatformLogo } from '@/utils/platform'
 import { IconShoppingCart, IconTrash, IconCheck, IconPlus, IconX } from '@/assets/icons'
-import { formatUSD, formatPEN, getLogoPath } from '@/utils'
+import { formatUSD, formatPEN } from '@/utils'
 import PhoneInput from '@/components/shared/PhoneInput'
 
 function CartItemThumb({ item }) {
   const [imgErr, setImgErr] = useState(false)
-  const [logoErr, setLogoErr] = useState(false)
-  const logoPath = getLogoPath(item.platforms?.logo_filename)
-  const imageUrl = item.image_url || null
-
-  if (imageUrl && !imgErr) {
-    return (
-      <div style={{ width: 48, height: 48, borderRadius: 12, overflow: 'hidden', flexShrink: 0, border: '1px solid var(--surface-border)' }}>
-        <img src={imageUrl} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={() => setImgErr(true)} />
-      </div>
-    )
+  if (item.image_url && !imgErr) {
+    return <img src={item.image_url} alt="" className="w-12 h-12 rounded-xl object-contain p-0.5 bg-[var(--surface-overlay)] flex-shrink-0 border border-[var(--surface-border)]" onError={() => setImgErr(true)} />
   }
-  return (
-    <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-      {logoPath && !logoErr
-        ? <img src={logoPath} alt={item.platforms?.name} style={{ width: 36, height: 36, objectFit: 'contain' }} onError={() => setLogoErr(true)} />
-        : <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink-muted)' }}>{(item.platforms?.name || item.name || '?')[0]}</span>
-      }
-    </div>
-  )
+  return <PlatformLogo name={item.platforms?.name || item.custom_platform_name || item.name} filename={item.platforms?.logo_filename} size={48} />
 }
 
 export default function Carrito() {
   const { items, grouped, updateQuantity, clearCart, total, count } = useCart()
-  const { profile } = useAuth()
   const { balance, refetch: refetchBalance } = useBalance()
   const { settings } = useSettings()
   const navigate = useNavigate()
@@ -82,158 +66,138 @@ export default function Carrito() {
   if (success) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="card p-10 max-w-sm w-full text-center animate-slide-up">
-          <div className="w-16 h-16 rounded-2xl bg-[var(--status-green-bg)] flex items-center justify-center mx-auto mb-5">
-            <IconCheck size={32} className="text-[var(--status-green)]" />
+        <div className="card card-sig p-8 sm:p-10 max-w-sm w-full text-center animate-slide-up">
+          <div className="w-16 h-16 rounded-2xl mx-auto mb-5 grid place-items-center bg-[var(--a-soft)] border border-[var(--a-line)] text-[var(--a)] animate-pop">
+            <IconCheck size={30} />
           </div>
-          <h2 className="font-display font-bold text-xl text-[var(--ink)] mb-2">Compra exitosa</h2>
+          <h2 className="font-display text-2xl text-[var(--ink)] mb-2">Compra <span className="ser grad">lista</span></h2>
           <p className="text-sm text-[var(--ink-muted)] mb-6">
-            {createdCount > 1 ? `${createdCount} pedidos creados.` : 'Tu pedido esta listo.'} Revisa tu panel para ver las credenciales.
+            {createdCount > 1 ? `${createdCount} pedidos creados.` : 'Tu pedido está listo.'} Encuentra las credenciales en "Mis pedidos".
           </p>
-          <button onClick={() => navigate('/dashboard')} className="btn-primary w-full justify-center">Ver mis pedidos</button>
+          <div className="flex flex-col gap-2.5">
+            <button onClick={() => navigate('/dashboard')} className="btn-primary w-full">Ver mis pedidos</button>
+            <button onClick={() => navigate('/tienda')} className="btn-ghost w-full justify-center">Seguir comprando</button>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <PageHeader title="Carrito" subtitle={`${count} producto${count !== 1 ? 's' : ''}`} />
+    <div className={grouped.length ? 'pb-28 lg:pb-0' : ''}>
+      <PageHeader title="Tu" accent="carrito" subtitle={count ? `${count} producto${count !== 1 ? 's' : ''} · cada unidad es un pedido` : 'Todavía no agregas productos'} />
 
       {grouped.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-[var(--surface-overlay)] flex items-center justify-center mb-4 text-[var(--ink-faint)]">
-            <IconShoppingCart size={30} />
-          </div>
-          <h3 className="font-display font-semibold text-[var(--ink)] mb-1">Tu carrito esta vacio</h3>
-          <p className="text-sm text-[var(--ink-muted)] mb-5">Agrega productos desde la tienda</p>
-          <button onClick={() => navigate('/tienda')} className="btn-primary">Ir a la tienda</button>
+        <div className="card">
+          <EmptyState
+            icon={IconShoppingCart}
+            title="Tu carrito está vacío"
+            description="Agrega productos desde la tienda y aparecerán aquí."
+            action={<button onClick={() => navigate('/tienda')} className="btn-primary">Ir a la tienda</button>}
+          />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-          {/* ITEMS AGRUPADOS */}
-          <div className="lg:col-span-2 space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* Productos */}
+          <div className="lg:col-span-2 space-y-3 stagger">
             {grouped.map(item => (
-              <div key={item.id} className="card p-4 flex items-center gap-4">
+              <div key={item.id} className="card p-4 flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-3">
                 <CartItemThumb item={item} />
-
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm truncate">{item.name}</p>
-                  <p className="text-xs text-[var(--ink-faint)]">
-                    {item.platforms?.name} · {item.duration_days} dias
-                  </p>
-                  {item.quantity > 1 && (
-                    <p className="text-xs text-[var(--ink-faint)] mt-0.5">
-                      {item.quantity} x {formatUSD(item.price_usd)} c/u
-                    </p>
-                  )}
+                  <p className="font-semibold text-[15px] text-[var(--ink)] truncate">{item.name}</p>
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5">{item.platforms?.name} · {item.duration_days} días</p>
+                  <p className="text-xs text-[var(--ink-faint)] mt-0.5 font-mono">{formatUSD(item.price_usd)} c/u</p>
                 </div>
 
-                {/* Selector de cantidad */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface-overlay)', borderRadius: 10, padding: '4px 6px', border: '1px solid var(--surface-border)' }}>
+                <div className="flex items-center gap-3 ml-auto">
+                  <div className="inset flex items-center gap-1 p-1">
+                    <button onClick={() => updateQuantity(item.id, -1)} className="btn-secondary btn-sm btn-icon" aria-label="Quitar uno">−</button>
+                    <span className="font-mono text-[15px] text-[var(--ink)] min-w-[28px] text-center" aria-live="polite">{item.quantity}</span>
+                    <button onClick={() => updateQuantity(item.id, 1)} className="btn-secondary btn-sm btn-icon" aria-label="Agregar uno"><IconPlus size={14} /></button>
+                  </div>
+                  <div className="text-right min-w-[78px]">
+                    <p className="font-mono text-[15px] text-[var(--ink)]">{formatUSD(item.subtotal)}</p>
+                    <p className="text-[11px] text-[var(--ink-faint)]">≈ {formatPEN(item.subtotal * rate)}</p>
+                  </div>
                   <button
-                    onClick={() => updateQuantity(item.id, -1)}
-                    style={{ width: 26, height: 26, borderRadius: 7, border: 'none', background: 'var(--surface-raised)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)', fontWeight: 700, fontSize: 16 }}>
-                    −
-                  </button>
-                  <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600, fontSize: 14, color: 'var(--ink)', minWidth: 20, textAlign: 'center' }}>
-                    {item.quantity}
-                  </span>
-                  <button
-                    onClick={() => updateQuantity(item.id, 1)}
-                    style={{ width: 26, height: 26, borderRadius: 7, border: 'none', background: 'var(--surface-raised)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)', fontWeight: 700, fontSize: 16 }}>
-                    +
+                    onClick={() => { for (let i = 0; i < item.quantity; i++) updateQuantity(item.id, -1) }}
+                    className="btn-ghost p-2 hover:!text-[var(--status-red)]"
+                    aria-label={`Quitar ${item.name}`}
+                  >
+                    <IconTrash size={16} />
                   </button>
                 </div>
-
-                <div className="text-right" style={{ minWidth: 70 }}>
-                  <p className="font-display font-bold">{formatUSD(item.subtotal)}</p>
-                  <p className="text-xs text-[var(--ink-faint)]">≈ {formatPEN(item.subtotal * rate)}</p>
-                </div>
-
-                <button onClick={() => {
-                  // Quitar todas las instancias de este producto
-                  for (let i = 0; i < item.quantity; i++) updateQuantity(item.id, -1)
-                }} className="btn-ghost p-2 text-[var(--status-red)]">
-                  <IconTrash size={15} />
-                </button>
               </div>
             ))}
+            <button onClick={() => navigate('/tienda')} className="btn-ghost"><IconPlus size={15} />Agregar más productos</button>
           </div>
 
-          {/* RESUMEN */}
-          <div className="space-y-4">
-            <div className="card p-5 space-y-4">
-              <h2 className="font-display font-semibold">Resumen</h2>
-
+          {/* Resumen */}
+          <aside className="card p-5 space-y-4 lg:sticky lg:top-6">
+            <h2 className="font-display font-semibold text-lg">Resumen</h2>
+            <div className="space-y-2">
               {grouped.map(item => (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--ink-muted)' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
-                    {item.quantity > 1 ? `${item.quantity}x ` : ''}{item.name}
-                  </span>
-                  <span style={{ flexShrink: 0, marginLeft: 8 }}>{formatUSD(item.subtotal)}</span>
+                <div key={item.id} className="flex justify-between gap-3 text-[13px] text-[var(--ink-muted)]">
+                  <span className="truncate">{item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}</span>
+                  <span className="font-mono flex-shrink-0">{formatUSD(item.subtotal)}</span>
                 </div>
               ))}
-
-              <div className="divider" />
-
-              <div className="flex justify-between text-sm">
-                <span>En soles</span>
-                <span>≈ {formatPEN(total * rate)}</span>
-              </div>
-              <div className="flex justify-between font-bold text-lg">
-                <span>Total</span>
-                <span>{formatUSD(total)}</span>
-              </div>
-
-              <div style={{ padding: '10px 12px', borderRadius: 12, background: insufficient ? 'var(--status-red-bg)' : 'var(--status-green-bg)', border: `1px solid ${insufficient ? 'var(--status-red-border)' : 'var(--status-green-border)'}` }}>
-                <div className="flex justify-between text-sm">
-                  <span style={{ color: insufficient ? 'var(--status-red)' : 'var(--status-green)' }}>Tu saldo</span>
-                  <span style={{ fontWeight: 700, color: insufficient ? 'var(--status-red)' : 'var(--status-green)' }}>{formatUSD(balance)}</span>
-                </div>
-                {insufficient && (
-                  <p style={{ fontSize: 11, color: 'var(--status-red)', marginTop: 4 }}>
-                    Te faltan {formatUSD(total - balance)} para completar esta compra
-                  </p>
-                )}
-              </div>
-
-              {insufficient && <Alert type="error">Saldo insuficiente para completar la compra</Alert>}
-
-              <button
-                onClick={() => { setModal(true); setError('') }}
-                disabled={insufficient || grouped.length === 0}
-                className="btn-primary w-full"
-                style={{ justifyContent: 'center' }}>
-                Confirmar compra · {formatUSD(total)}
-              </button>
-
-              <button onClick={() => navigate('/tienda')} className="btn-secondary w-full" style={{ justifyContent: 'center', fontSize: 13 }}>
-                Seguir comprando
-              </button>
             </div>
-          </div>
+            <div className="divider !my-0" />
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="eyebrow">Total</p>
+                <p className="text-xs text-[var(--ink-faint)] mt-1">≈ {formatPEN(total * rate)}</p>
+              </div>
+              <p className="font-mono text-[1.75rem] leading-none text-[var(--ink)]">{formatUSD(total)}</p>
+            </div>
+
+            <div className={`rounded-xl px-3.5 py-3 border ${insufficient ? 'bg-[var(--status-red-bg)] border-[var(--status-red-border)]' : 'bg-[var(--a-soft)] border-[var(--a-line)]'}`}>
+              <div className="flex justify-between text-sm">
+                <span className={insufficient ? 'text-[var(--status-red)]' : 'text-[var(--ink-muted)]'}>Tu saldo</span>
+                <span className={`font-mono ${insufficient ? 'text-[var(--status-red)]' : 'text-[var(--a)]'}`}>{formatUSD(balance)}</span>
+              </div>
+              {insufficient
+                ? <p className="text-xs text-[var(--status-red)] mt-1.5">Te faltan {formatUSD(total - balance)}. <button className="underline font-semibold" onClick={() => navigate('/tienda?recargar=1')}>Recargar</button></p>
+                : <p className="text-xs text-[var(--ink-muted)] mt-1.5">Después de comprar te quedan <span className="font-mono">{formatUSD(balance - total)}</span></p>}
+            </div>
+
+            <button onClick={() => { setModal(true); setError('') }} disabled={insufficient || grouped.length === 0} className="btn-primary btn-lg w-full hidden lg:inline-flex">
+              Confirmar compra · {formatUSD(total)}
+            </button>
+          </aside>
         </div>
       )}
 
-      <Modal open={modal} onClose={() => setModal(false)} title="Datos del cliente">
+      {/* Botón fijo en móvil */}
+      {grouped.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-30 p-3 lg:hidden bg-gradient-to-t from-[var(--surface)] via-[var(--surface)] to-transparent" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+          <button onClick={() => { setModal(true); setError('') }} disabled={insufficient} className="btn-primary w-full !h-14 !rounded-2xl !justify-between !px-5">
+            <span>{insufficient ? 'Saldo insuficiente' : 'Confirmar compra'}</span>
+            <span className="font-mono">{formatUSD(total)}</span>
+          </button>
+        </div>
+      )}
+
+      <Modal
+        open={modal}
+        onClose={() => setModal(false)}
+        title="¿Para quién es?"
+        subtitle="Estos datos se usan en todos los pedidos de esta compra."
+        footer={<>
+          <button onClick={() => setModal(false)} className="btn-ghost">Cancelar</button>
+          <button onClick={checkout} disabled={loading} className="btn-primary min-w-[140px]">
+            {loading ? <Spinner size={16} /> : `Pagar ${formatUSD(total)}`}
+          </button>
+        </>}
+      >
         <div className="space-y-4">
-          <p style={{ fontSize: 13, color: 'var(--ink-muted)', marginBottom: 4 }}>
-            Estos datos se usaran para todos los pedidos de esta compra.
-          </p>
           <div>
             <label className="label">Nombre del cliente</label>
-            <input className="input" placeholder="Nombre completo" value={clientName} onChange={e => setClientName(e.target.value)} autoFocus />
+            <input className="input" placeholder="María Pérez" value={clientName} onChange={e => setClientName(e.target.value)} autoFocus />
           </div>
           <PhoneInput label="WhatsApp del cliente" value={clientPhone} onChange={setClientPhone} />
           {error && <Alert type="error">{error}</Alert>}
-          <div className="flex gap-2">
-            <button onClick={() => setModal(false)} className="btn-secondary flex-1" style={{ justifyContent: 'center' }}>Cancelar</button>
-            <button onClick={checkout} disabled={loading} className="btn-primary flex-1" style={{ justifyContent: 'center' }}>
-              {loading ? <Spinner size={16} /> : `Pagar ${formatUSD(total)}`}
-            </button>
-          </div>
         </div>
       </Modal>
     </div>

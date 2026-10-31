@@ -1,86 +1,55 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useCart } from '@/context/CartContext'
 import { useBalance } from '@/hooks/useBalance'
 import { useSettings } from '@/hooks/useSettings'
-import { EmptyState, Spinner, Modal } from '@/components/ui'
+import { EmptyState, Modal, SkeletonGrid, useToast } from '@/components/ui'
 import ProductCard from '@/components/shared/ProductCard'
-import { IconSearch, IconShoppingCart, IconStore, IconDollar, IconCopy } from '@/assets/icons'
+import { getMethodMeta, MethodLogo } from '@/lib/paymentMethods'
+import { PlatformLogo } from '@/utils/platform'
+import { IconSearch, IconShoppingCart, IconStore, IconCopy, IconCheck, IconX, IconChevronRight, IconDownload } from '@/assets/icons'
 import { formatUSD } from '@/utils'
+import { waLink } from '@/lib/whatsapp'
+import { saveImage } from '@/lib/download'
+import { AnnouncementsButton } from '@/components/shared/Announcements'
 
-const PAYMENT_METHODS_META = {
-  yape:    { label: 'Yape',    logo: '/logos/logoYAPE.png'    },
-  plin:    { label: 'Plin',    logo: '/logos/logoPLIN.png'    },
-  bim:     { label: 'Bim',     logo: '/logos/LOGOBIM.webp'    },
-  binance: { label: 'Binance', logo: '/logos/logoBINANCE.webp' },
-  lemon:   { label: 'Lemon',   logo: '/logos/logoLEMON.webp'  },
-  agora:   { label: 'Agora',   logo: '/logos/LOGOAGORA.webp'  },
-}
+const WA_ICON = <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" /></svg>
 
-function MethodLogo({ logo, label, size = 24 }) {
-  const [err, setErr] = useState(false)
-  if (err) return (
-    <div style={{ width: size, height: size, borderRadius: size/4, background: 'var(--surface-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.45, fontWeight: 700, color: 'var(--ink-muted)' }}>
-      {label[0]}
-    </div>
-  )
-  return <img src={logo} alt={label} width={size} height={size} style={{ borderRadius: size/4, objectFit: 'contain' }} onError={() => setErr(true)} />
-}
-
-function CopyBtn({ value }) {
+function CopyRow({ label, value, mono }) {
   const [copied, setCopied] = useState(false)
   function copy() {
-    navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+    navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800) })
   }
   return (
-    <button onClick={copy} className="btn-ghost" style={{ padding: '5px 8px', color: copied ? 'var(--status-green)' : 'var(--ink-faint)' }}>
-      {copied
-        ? <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-        : <IconCopy size={14} />
-      }
-    </button>
-  )
-}
-
-function ProviderLogo({ logoUrl, name, size = 44 }) {
-  const [err, setErr] = useState(false)
-  if (!logoUrl || err) {
-    return (
-      <div style={{ width: size, height: size, borderRadius: size / 4, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: size * 0.45, color: 'var(--ink-muted)' }}>
-        {(name || 'T')[0].toUpperCase()}
+    <div>
+      <p className="label">{label}</p>
+      <div className="inset flex items-center justify-between gap-2 pl-3.5 pr-1.5 py-1.5">
+        <span className={`text-[var(--ink)] truncate ${mono ? 'font-mono text-[15px] tracking-wide' : 'font-semibold text-sm'}`}>{value}</span>
+        <button onClick={copy} className={`btn-secondary btn-sm btn-icon ${copied ? '!text-[var(--a)] !border-[var(--a-line)]' : ''}`} aria-label={`Copiar ${label}`}>
+          {copied ? <IconCheck size={14} className="animate-pop" /> : <IconCopy size={14} />}
+        </button>
       </div>
-    )
-  }
-  return (
-    <img src={logoUrl} alt={name}
-      style={{ width: size, height: size, borderRadius: size / 4, objectFit: 'contain', border: '1px solid var(--surface-border)', background: 'var(--surface-overlay)', padding: 4 }}
-      onError={() => setErr(true)} />
+    </div>
   )
 }
 
-// ── Modal de recarga con flujo completo ──────────────────────────────────────
-function RechargeModal({ method, provider, profile, exchangeRate, onClose }) {
-  const meta = PAYMENT_METHODS_META[method.method_key] || { label: method.method_key, logo: '' }
-  const [step, setStep] = useState(1)
+// ── Recarga: elegir método → monto → datos y aviso por WhatsApp ─────────────
+function RechargeModal({ methods, initial, provider, profile, exchangeRate, onClose }) {
+  const toast = useToast()
+  const [method, setMethod] = useState(initial || (methods.length === 1 ? methods[0] : null))
+  const [step, setStep] = useState(initial || methods.length === 1 ? 1 : 0)
   const [usdAmount, setUsdAmount] = useState('')
+  const meta = method ? getMethodMeta(method.method_key) : null
 
-  const penAmount = usdAmount && !isNaN(usdAmount)
-    ? (parseFloat(usdAmount) * exchangeRate).toFixed(2)
-    : ''
-
-  // Nombre del distribuidor para el mensaje
+  const valid = usdAmount && !isNaN(usdAmount) && parseFloat(usdAmount) > 0
+  const penAmount = valid ? (parseFloat(usdAmount) * exchangeRate).toFixed(2) : ''
   const distributorName = profile?.full_name || profile?.email?.split('@')[0] || 'Distribuidor'
-
-  function handleNext() {
-    if (!usdAmount || isNaN(usdAmount) || parseFloat(usdAmount) <= 0) return
-    setStep(2)
-  }
 
   function sendWhatsApp() {
     const phone = (provider?.whatsapp_support || '').replace(/\D/g, '')
-    if (!phone) { alert('El proveedor no tiene número de soporte configurado.'); return }
+    if (!phone) { toast.error('Tu proveedor aún no configuró su número de WhatsApp.'); return }
     const msg =
       `Hola! 👋 Soy *${distributorName}*, distribuidor de *${provider?.display_name || 'tu tienda'}*.\n\n` +
       `He realizado una recarga por:\n` +
@@ -90,119 +59,120 @@ function RechargeModal({ method, provider, profile, exchangeRate, onClose }) {
       `Titular: *${method.holder_name}*\n\n` +
       `Por favor me confirma cuando esté listo. ¡Gracias! 🙏\n\n` +
       `_(Envío el comprobante de pago)_`
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+    window.open(waLink(phone, msg), '_blank')
     onClose()
   }
 
-  return (
-    <Modal open={true} onClose={onClose} title={`Recargar con ${meta.label}`} maxWidth="max-w-sm">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+  const steps = ['Método', 'Monto', 'Pagar']
 
-        {/* Logo + nombre método */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--surface-overlay)', borderRadius: 12 }}>
-          <MethodLogo logo={meta.logo} label={meta.label} size={46} />
-          <div>
-            <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>{meta.label}</p>
-            <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-              {step === 1 ? '¿Cuánto deseas recargar?' : 'Datos para transferir'}
-            </p>
+  return (
+    <Modal open onClose={onClose} title="Recargar saldo" subtitle={`1 USD = S/ ${exchangeRate}`} maxWidth="max-w-md">
+      <div className="flex items-center gap-2 mb-5">
+        {steps.map((s, i) => (
+          <div key={s} className="flex-1">
+            <div className={`h-1 rounded-full transition-colors duration-300 ${i <= step ? 'bg-[var(--a)]' : 'bg-[var(--surface-border)]'}`} />
+            <p className={`text-[11px] mt-1.5 font-semibold ${i === step ? 'text-[var(--ink)]' : 'text-[var(--ink-faint)]'}`}>{s}</p>
+          </div>
+        ))}
+      </div>
+
+      {step === 0 && (
+        <div className="grid grid-cols-2 gap-2.5 stagger">
+          {methods.map(m => {
+            const mm = getMethodMeta(m.method_key)
+            return (
+              <button key={m.id} onClick={() => { setMethod(m); setStep(1) }} className="btn-secondary !justify-start !h-auto !py-3 !px-3.5">
+                <MethodLogo logo={mm.logo} label={mm.label} size={32} />
+                <span className="text-left">
+                  <span className="block text-sm">{mm.label}</span>
+                  <span className="block text-[11px] font-medium text-[var(--ink-faint)] truncate max-w-[110px]">{m.holder_name}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {step === 1 && meta && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <MethodLogo logo={meta.logo} label={meta.label} size={40} />
+            <div className="min-w-0">
+              <p className="font-semibold text-[var(--ink)]">{meta.label}</p>
+              <p className="text-xs text-[var(--ink-muted)]">¿Cuánto deseas recargar?</p>
+            </div>
+            {methods.length > 1 && <button className="btn-ghost text-xs ml-auto" onClick={() => setStep(0)}>Cambiar</button>}
+          </div>
+          <label className="inset flex items-center gap-2 px-4 py-3 focus-within:border-[var(--a)]">
+            <span className="font-mono text-xl text-[var(--ink-faint)]">$</span>
+            <input
+              type="number" inputMode="decimal" min="0.01" step="0.01" placeholder="0.00" autoFocus
+              value={usdAmount} onChange={e => setUsdAmount(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent outline-none font-mono text-2xl text-[var(--ink)]"
+              aria-label="Monto en dólares"
+            />
+            <span className="text-xs font-semibold text-[var(--ink-faint)]">USD</span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {[5, 10, 20, 50].map(v => (
+              <button key={v} className={`btn-secondary btn-sm ${parseFloat(usdAmount) === v ? 'is-down' : ''}`} onClick={() => setUsdAmount(String(v))}>${v}</button>
+            ))}
+          </div>
+          {valid && (
+            <div className="flex items-center justify-between rounded-xl px-4 py-3 bg-[var(--a-soft)] border border-[var(--a-line)] animate-fade-in">
+              <span className="text-[13px] text-[var(--ink-muted)]">Transfieres</span>
+              <span className="font-mono text-lg text-[var(--a)]">S/ {penAmount}</span>
+            </div>
+          )}
+          <button onClick={() => valid && setStep(2)} disabled={!valid} className="btn-primary w-full">
+            Siguiente <IconChevronRight size={15} />
+          </button>
+        </div>
+      )}
+
+      {step === 2 && meta && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="card card-sig p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <MethodLogo logo={meta.logo} label={meta.label} size={36} />
+              <span className="text-sm text-[var(--ink-muted)]">Transfiere por {meta.label}</span>
+            </div>
+            <div className="text-right">
+              <p className="font-mono text-xl grad leading-none">S/ {penAmount}</p>
+              <p className="text-[11px] text-[var(--ink-faint)] mt-1">${parseFloat(usdAmount).toFixed(2)} USD</p>
+            </div>
+          </div>
+          {method.qr_url && (
+            <div className="flex flex-col items-center gap-2.5">
+              <img src={method.qr_url} alt={`QR de ${meta.label}`} className="w-48 h-48 object-contain rounded-2xl bg-white p-2 border border-[var(--surface-border)] shadow-[0_6px_18px_var(--shadow-soft)]" onError={e => { e.currentTarget.style.display = 'none' }} />
+              <button onClick={async () => { const r = await saveImage(method.qr_url, `QR-${meta.label}`); if (r === 'downloaded') toast.success('QR descargado'); if (r === 'opened') toast('Mantén presionada la imagen para guardarla') }} className="btn-secondary btn-sm"><IconDownload size={14} />Guardar QR</button>
+              <p className="text-[11px] text-[var(--ink-faint)] text-center">Guárdalo y ábrelo desde tu app de pagos para escanearlo.</p>
+            </div>
+          )}
+          <CopyRow label="Titular" value={method.holder_name} />
+          <CopyRow label={method.method_key === 'binance' ? 'ID de Binance Pay' : 'Número'} value={method.account_number} mono />
+          <p className="text-xs text-[var(--ink-muted)] text-center leading-relaxed">
+            Haz la transferencia y avisa a tu proveedor con el comprobante. Tu saldo se carga cuando lo confirme.
+          </p>
+          <div className="flex gap-2.5">
+            <button onClick={() => setStep(1)} className="btn-secondary flex-1">Atrás</button>
+            <button onClick={sendWhatsApp} className="btn-primary flex-[2]">{WA_ICON}Avisar al proveedor</button>
           </div>
         </div>
-
-        {step === 1 && (
-          <>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', display: 'block', marginBottom: 6 }}>
-                Monto a recargar (USD)
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', borderRadius: 10, padding: '10px 12px' }}>
-                <span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--ink-faint)' }}>$</span>
-                <input
-                  type="number" min="0.01" step="0.01"
-                  placeholder="0.00"
-                  value={usdAmount}
-                  onChange={e => setUsdAmount(e.target.value)}
-                  style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20, color: 'var(--ink)' }}
-                  autoFocus
-                />
-                <span style={{ fontSize: 12, color: 'var(--ink-faint)', fontWeight: 600 }}>USD</span>
-              </div>
-            </div>
-
-            {penAmount && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', borderRadius: 10, padding: '10px 14px' }}>
-                <p style={{ fontSize: 13, color: 'var(--status-green)' }}>Equivale a transferir:</p>
-                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--status-green)' }}>S/ {penAmount}</p>
-              </div>
-            )}
-
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', textAlign: 'center' }}>TC: 1 USD = S/ {exchangeRate}</p>
-
-            <button
-              onClick={handleNext}
-              disabled={!usdAmount || isNaN(usdAmount) || parseFloat(usdAmount) <= 0}
-              className="btn-primary"
-              style={{ width: '100%', justifyContent: 'center', opacity: (!usdAmount || parseFloat(usdAmount) <= 0) ? 0.5 : 1 }}
-            >
-              Siguiente →
-            </button>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--surface-border)' }}>
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Monto a transferir</p>
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--ink)' }}>S/ {penAmount}</p>
-                <p style={{ fontSize: 11, color: 'var(--ink-faint)' }}>${parseFloat(usdAmount).toFixed(2)} USD</p>
-              </div>
-            </div>
-
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 6 }}>Titular</p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', borderRadius: 10, padding: '10px 12px' }}>
-                <span style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 14 }}>{method.holder_name}</span>
-                <CopyBtn value={method.holder_name} />
-              </div>
-            </div>
-
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 6 }}>
-                {method.method_key === 'binance' ? 'ID de Binance Pay' : 'Número'}
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', borderRadius: 10, padding: '10px 12px' }}>
-                <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600, color: 'var(--ink)', fontSize: 15, letterSpacing: '0.02em' }}>{method.account_number}</span>
-                <CopyBtn value={method.account_number} />
-              </div>
-            </div>
-
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', textAlign: 'center', lineHeight: 1.6 }}>
-              Realiza la transferencia y luego notifica a tu proveedor adjuntando el comprobante.
-            </p>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setStep(1)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>← Atrás</button>
-              <button onClick={sendWhatsApp} className="btn-primary"
-                style={{ flex: 2, justifyContent: 'center', background: '#25d366', borderColor: '#25d366' }}>
-                <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                Notificar al proveedor
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      )}
     </Modal>
   )
 }
 
-// ── Componente principal ─────────────────────────────────────────────────────
+// ── Página ───────────────────────────────────────────────────────────────────
 export default function Tienda() {
   const { provider, profile } = useAuth()
-  const { addItem, count } = useCart()
+  const { addItem, count, total } = useCart()
   const { balance } = useBalance()
   const { settings } = useSettings()
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const toast = useToast()
   const exchangeRate = parseFloat(settings?.exchange_rate) || 3.5
 
   const [products, setProducts] = useState([])
@@ -211,9 +181,9 @@ export default function Tienda() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterPlatform, setFilterPlatform] = useState('all')
-  const [added, setAdded] = useState(null)
+  const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [paymentMethods, setPaymentMethods] = useState([])
-  const [selectedMethod, setSelectedMethod] = useState(null)
+  const [recharge, setRecharge] = useState(null) // null | { method }
 
   useEffect(() => { if (provider) fetchProducts() }, [provider])
 
@@ -221,6 +191,14 @@ export default function Tienda() {
     const provId = provider?.id || profile?.provider_id
     if (provId) fetchPaymentMethods(provId)
   }, [provider?.id, profile?.provider_id])
+
+  // Abrir recarga desde el menú lateral (/tienda?recargar=1)
+  useEffect(() => {
+    if (params.get('recargar') && paymentMethods.length) {
+      setRecharge({ method: null })
+      params.delete('recargar'); setParams(params, { replace: true })
+    }
+  }, [params, paymentMethods.length])
 
   async function fetchPaymentMethods(provId) {
     const { data } = await supabase.from('payment_methods').select('*').eq('provider_id', provId).eq('is_active', true)
@@ -235,10 +213,10 @@ export default function Tienda() {
     setProducts(data || [])
     const pMap = {}
     data?.forEach(p => { if (p.platforms) pMap[p.platforms.id] = p.platforms })
-    setPlatforms(Object.values(pMap))
+    setPlatforms(Object.values(pMap).sort((a, b) => a.name.localeCompare(b.name)))
     if (data?.length) {
       const ids = data.map(p => p.id)
-      // Solo cantidades: el stock sin vender ya no es legible desde el navegador
+      // Solo cantidades: el stock sin vender no es legible desde el navegador
       const { data: stock } = await supabase.rpc('get_stock_counts', { p_product_ids: ids })
       const counts = {}
       stock?.forEach(s => { counts[s.product_id] = Number(s.available) || 0 })
@@ -249,114 +227,132 @@ export default function Tienda() {
 
   function handleBuy(product) {
     addItem(product)
-    setAdded(product.id)
-    setTimeout(() => setAdded(null), 2000)
+    toast.success(`${product.name} agregado al carrito`)
   }
 
-  const filtered = products.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.platforms?.name || p.custom_platform_name || '').toLowerCase().includes(search.toLowerCase())
-    const matchPlatform = filterPlatform === 'all' || p.platform_id === filterPlatform
-    return matchSearch && matchPlatform
-  })
+  const isAvailable = p => p.delivery_mode === 'stock' ? (stockCounts[p.id] || 0) > 0 : p.stock_qty !== 0
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return products
+      .filter(p => {
+        const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.platforms?.name || p.custom_platform_name || '').toLowerCase().includes(q)
+        const matchPlatform = filterPlatform === 'all' || p.platform_id === filterPlatform
+        return matchSearch && matchPlatform && (!onlyAvailable || isAvailable(p))
+      })
+      // Disponibles primero
+      .sort((a, b) => Number(isAvailable(b)) - Number(isAvailable(a)))
+  }, [products, search, filterPlatform, onlyAvailable, stockCounts])
+
+  const firstName = (profile?.full_name || profile?.email || '').split(/[ @]/)[0]
 
   return (
-    <div>
-      {/* HEADER */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ProviderLogo logoUrl={provider?.logo_url} name={provider?.display_name} size={44} />
-          <div>
-            <h1 style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20, color: 'var(--ink)', lineHeight: 1.2 }}>
-              {provider?.display_name || 'Tienda'}
-            </h1>
-            <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Tu proveedor</p>
-          </div>
+    <div className="pb-24 lg:pb-0">
+      {/* Encabezado */}
+      <div className="flex flex-wrap items-end justify-between gap-4 mb-6 animate-slide-up">
+        <div className="min-w-0">
+          <p className="eyebrow mb-2">Tienda de {provider?.display_name || 'tu proveedor'}</p>
+          <h1 className="font-display text-[1.9rem] md:text-[2.4rem] leading-[1.02] text-[var(--ink)]">
+            Hola, <span className="ser grad">{firstName || 'bienvenido'}</span>
+          </h1>
+          <p className="text-sm text-[var(--ink-muted)] mt-1.5">{products.length ? `${products.length} productos disponibles para vender hoy` : 'Elige lo que quieres vender hoy'}</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', padding: '8px 14px', borderRadius: 12 }}>
-            <IconDollar size={14} style={{ color: 'var(--ink-faint)' }} />
-            <div>
-              <p style={{ fontSize: 10, color: 'var(--ink-faint)', lineHeight: 1 }}>Tu saldo</p>
-              <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>{formatUSD(balance)}</p>
-            </div>
+        {/* En escritorio el saldo ya está en el menú lateral; aquí solo se muestra en móvil */}
+        <div className="lg:hidden w-full sm:w-auto flex items-center gap-3 rounded-2xl pl-4 pr-2 py-2 bg-[var(--a-soft)] border border-[var(--a-line)]">
+          <div className="flex-1 min-w-0 flex items-baseline gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[.12em] text-[var(--ink-muted)]">Saldo</span>
+            <span className="font-mono text-lg text-[var(--ink)] truncate">{formatUSD(balance)}</span>
           </div>
-          <button onClick={() => navigate('/carrito')} className="btn-primary" style={{ position: 'relative' }}>
-            <IconShoppingCart size={15} />Carrito
-            {count > 0 && (
-              <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--status-red)', color: 'white', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{count}</span>
-            )}
-          </button>
+          {paymentMethods.length > 0 && (
+            <button onClick={() => setRecharge({ method: null })} className="btn-primary btn-sm !px-3.5">Recargar</button>
+          )}
         </div>
       </div>
 
-      {/* MÉTODOS DE RECARGA */}
+      {/* Métodos de recarga */}
       {paymentMethods.length > 0 && (
-        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', background: 'var(--surface-raised)', border: '1px solid var(--surface-border)', borderRadius: 12 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-faint)', flexShrink: 0 }}>Recargar:</span>
+        <div className="flex items-center gap-2 mb-5 overflow-x-auto no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0 animate-slide-up" style={{ animationDelay: '.05s' }}>
+          <span className="eyebrow flex-shrink-0 mr-1">Recarga con</span>
           {paymentMethods.map(m => {
-            const meta = PAYMENT_METHODS_META[m.method_key] || { label: m.method_key, logo: '' }
+            const meta = getMethodMeta(m.method_key)
             return (
-              <button key={m.id} onClick={() => setSelectedMethod(m)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 99, border: '1px solid var(--surface-border)', background: 'var(--surface-overlay)', cursor: 'pointer', transition: 'all 0.15s', fontFamily: 'DM Sans, sans-serif' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--surface-border-strong)' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--surface-border)' }}
-              >
-                <MethodLogo logo={meta.logo} label={meta.label} size={18} />
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-muted)' }}>{meta.label}</span>
+              <button key={m.id} onClick={() => setRecharge({ method: m })} className="btn-secondary btn-sm flex-shrink-0 !pl-1.5">
+                <MethodLogo logo={meta.logo} label={meta.label} size={22} />{meta.label}
               </button>
             )
           })}
         </div>
       )}
 
-      {/* BUSCADOR */}
-      <div style={{ position: 'relative', marginBottom: 10 }}>
-        <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
-        <input className="input" style={{ paddingLeft: 36 }} placeholder="Buscar producto..." value={search} onChange={e => setSearch(e.target.value)} />
-      </div>
-
-      {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
-        {[{ id: 'all', name: 'Todas' }, ...platforms].map(p => (
-          <button key={p.id} onClick={() => setFilterPlatform(p.id)}
-            style={{ padding: '5px 14px', borderRadius: 99, fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s', border: '1px solid', fontFamily: 'DM Sans, sans-serif', whiteSpace: 'nowrap', background: filterPlatform === p.id ? 'var(--ink)' : 'transparent', color: filterPlatform === p.id ? 'var(--surface)' : 'var(--ink-muted)', borderColor: filterPlatform === p.id ? 'var(--ink)' : 'var(--surface-border)' }}>
-            {p.name}
+      {/* Buscador y filtros */}
+      <div className="flex flex-col sm:flex-row gap-2.5 mb-3 animate-slide-up" style={{ animationDelay: '.08s' }}>
+        <label className="relative flex-1">
+          <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)] pointer-events-none" />
+          <input className="input input-icon" placeholder="Buscar Netflix, Disney, perfil..." value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar producto" />
+          {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 btn-ghost p-1.5" aria-label="Limpiar"><IconX size={14} /></button>}
+        </label>
+        <div className="flex gap-2.5">
+          <button onClick={() => setOnlyAvailable(v => !v)} className={`btn-secondary flex-1 sm:flex-none ${onlyAvailable ? 'is-down !text-[var(--a)]' : ''}`} aria-pressed={onlyAvailable}>
+            <span className="dot" style={{ color: onlyAvailable ? 'var(--a)' : 'var(--ink-faint)' }} />Solo disponibles
           </button>
-        ))}
+          <AnnouncementsButton className="flex-1 sm:flex-none" />
+        </div>
       </div>
 
-      {/* PRODUCTOS */}
-      {loading ? <div className="flex justify-center py-20"><Spinner size={32} /></div> :
+      {platforms.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mb-5 -mx-4 px-4 sm:mx-0 sm:px-0">
+          <button onClick={() => setFilterPlatform('all')} className={`btn-secondary btn-sm flex-shrink-0 ${filterPlatform === 'all' ? 'is-down' : ''}`}>Todas</button>
+          {platforms.map(p => (
+            <button key={p.id} onClick={() => setFilterPlatform(f => f === p.id ? 'all' : p.id)} className={`btn-secondary btn-sm flex-shrink-0 !pl-1.5 ${filterPlatform === p.id ? 'is-down' : ''}`}>
+              <PlatformLogo name={p.name} filename={p.logo_filename} size={22} radius={6} />{p.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Productos */}
+      {loading ? <SkeletonGrid /> :
         filtered.length === 0 ? (
-          <EmptyState icon={IconStore} title="Sin productos" description="Tu proveedor aún no ha publicado productos o no coincide con tu búsqueda." />
+          <div className="card">
+            <EmptyState
+              icon={IconStore}
+              title={products.length ? 'No encontramos ese producto' : 'Aún no hay productos'}
+              description={products.length ? 'Prueba con otro nombre o quita los filtros.' : 'Tu proveedor todavía no publicó productos. Vuelve pronto.'}
+              action={products.length ? <button className="btn-secondary" onClick={() => { setSearch(''); setFilterPlatform('all'); setOnlyAvailable(false) }}>Quitar filtros</button> : null}
+            />
+          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 stagger">
+          <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 stagger">
             {filtered.map(p => (
-              <div key={p.id} className="relative">
-                {added === p.id && (
-                  <div className="absolute inset-0 z-10 rounded-[1.25rem] bg-[var(--status-green-bg)] border-2 border-[var(--status-green)] flex items-center justify-center animate-fade-in">
-                    <div className="flex items-center gap-2 text-[var(--status-green)] font-semibold text-sm">
-                      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                      Agregado
-                    </div>
-                  </div>
-                )}
-                <ProductCard product={p} exchangeRate={settings.exchange_rate} stockCount={stockCounts[p.id] || 0} onBuy={handleBuy} />
-              </div>
+              <ProductCard key={p.id} product={p} exchangeRate={exchangeRate} stockCount={stockCounts[p.id] || 0} onBuy={handleBuy} />
             ))}
           </div>
         )
       }
 
-      {/* MODAL DE RECARGA — ahora pasa profile para incluir nombre del distribuidor */}
-      {selectedMethod && (
+      {/* Barra del carrito (móvil) */}
+      {count > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-30 p-3 lg:hidden animate-slide-up" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+          <Link to="/carrito" className="btn-primary w-full !h-14 !justify-between !px-5 !rounded-2xl">
+            <span className="inline-flex items-center gap-2"><IconShoppingCart size={18} />{count} en el carrito</span>
+            <span className="font-mono">{formatUSD(total)} →</span>
+          </Link>
+        </div>
+      )}
+      {count > 0 && (
+        <button onClick={() => navigate('/carrito')} className="hidden lg:inline-flex btn-primary fixed bottom-6 right-6 z-30 !rounded-2xl !h-14 !px-5 animate-slide-up">
+          <IconShoppingCart size={18} />Ver carrito · {count}<span className="font-mono opacity-80 ml-1">{formatUSD(total)}</span>
+        </button>
+      )}
+
+      {recharge && (
         <RechargeModal
-          method={selectedMethod}
+          methods={paymentMethods}
+          initial={recharge.method}
           provider={provider}
           profile={profile}
           exchangeRate={exchangeRate}
-          onClose={() => setSelectedMethod(null)}
+          onClose={() => setRecharge(null)}
         />
       )}
     </div>

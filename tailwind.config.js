@@ -5,9 +5,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Syne"', 'sans-serif'],
-        body: ['"DM Sans"', 'sans-serif'],
-        mono: ['"DM Mono"', 'monospace'],
+        display: ['var(--font-display)'],
+        body: ['var(--font-ui)'],
+        serif: ['var(--font-serif)'],
+        mono: ['var(--font-mono)'],
       },
       colors: {
         surface: {

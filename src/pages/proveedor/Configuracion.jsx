@@ -1,42 +1,38 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { PageHeader, Alert, Spinner, Modal, Toggle } from '@/components/ui'
-import { IconSettings, IconUsers, IconTrash } from '@/assets/icons'
+import { PageHeader, Alert, Spinner, Modal, Toggle, PageLoader, CopyField, useToast, useConfirm } from '@/components/ui'
+import { PAYMENT_METHODS, MethodLogo, getMethodMeta } from '@/lib/paymentMethods'
+import { DEFAULT_DUO, APP_FULL_NAME, applyBrand } from '@/lib/brand'
+import BrandColors from '@/components/shared/BrandColors'
+import AssistantSettings from '@/components/shared/AssistantSettings'
+import { IconSettings, IconTrash, IconStore } from '@/assets/icons'
 
-const PAYMENT_METHODS = [
-  { key: 'yape',    label: 'Yape',    logo: '/logos/logoYAPE.png',    placeholder: 'Número de teléfono' },
-  { key: 'plin',    label: 'Plin',    logo: '/logos/logoPLIN.png',    placeholder: 'Número de teléfono' },
-  { key: 'bim',     label: 'Bim',     logo: '/logos/LOGOBIM.webp',    placeholder: 'Número de teléfono' },
-  { key: 'binance', label: 'Binance', logo: '/logos/logoBINANCE.webp', placeholder: 'ID de Binance Pay' },
-  { key: 'lemon',   label: 'Lemon',   logo: '/logos/logoLEMON.webp',  placeholder: 'Número de teléfono' },
-  { key: 'agora',   label: 'Agora',   logo: '/logos/LOGOAGORA.webp',  placeholder: 'Número de teléfono' },
-  { key: 'Prexpe',   label: 'Prexpe',   logo: '/logos/logoPREXPE.png',  placeholder: 'Número de teléfono' },
-
-]
-
-function MethodLogo({ logo, label, size = 32 }) {
-  const [err, setErr] = useState(false)
-  if (err) return (
-    <div style={{ width: size, height: size, borderRadius: size/4, background: 'var(--surface-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.4, fontWeight: 700, color: 'var(--ink-muted)' }}>
-      {label[0]}
+function SectionTitle({ icon, title, subtitle }) {
+  return (
+    <div className="flex items-center gap-3 mb-5">
+      <span className="w-10 h-10 rounded-xl inset grid place-items-center text-[var(--ink-muted)] flex-shrink-0">{icon}</span>
+      <div>
+        <h2 className="font-display font-semibold text-[var(--ink)]">{title}</h2>
+        {subtitle && <p className="text-xs text-[var(--ink-muted)]">{subtitle}</p>}
+      </div>
     </div>
   )
-  return <img src={logo} alt={label} width={size} height={size} style={{ borderRadius: size/4, objectFit: 'contain' }} onError={() => setErr(true)} />
 }
 
 export default function ProveedorConfiguracion() {
   const { provider, refreshProfile } = useAuth()
+  const toast = useToast()
+  const confirm = useConfirm()
 
-  const [form, setForm] = useState({ display_name: '', slug: '', whatsapp_support: '', logo_url: '' })
+  const [form, setForm] = useState({ display_name: '', slug: '', whatsapp_support: '', logo_url: '', brand_accent: DEFAULT_DUO })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
 
   const [methods, setMethods] = useState([])
   const [methodModal, setMethodModal] = useState(null)
-  const [methodForm, setMethodForm] = useState({ holder_name: '', account_number: '' })
+  const [methodForm, setMethodForm] = useState({ holder_name: '', account_number: '', qr_url: '' })
   const [methodSaving, setMethodSaving] = useState(false)
   const [methodError, setMethodError] = useState('')
 
@@ -47,11 +43,16 @@ export default function ProveedorConfiguracion() {
         slug: provider.slug || '',
         whatsapp_support: provider.whatsapp_support || '',
         logo_url: provider.logo_url || '',
+        brand_accent: provider.brand_accent || DEFAULT_DUO,
       })
       fetchMethods()
       setLoading(false)
     }
   }, [provider])
+
+  // Vista previa en vivo del color; si sales sin guardar, vuelve al guardado
+  useEffect(() => { applyBrand(form.brand_accent) }, [form.brand_accent])
+  useEffect(() => () => applyBrand(provider?.brand_accent), [provider?.brand_accent])
 
   async function fetchMethods() {
     const { data } = await supabase.from('payment_methods').select('*').eq('provider_id', provider.id)
@@ -59,255 +60,246 @@ export default function ProveedorConfiguracion() {
   }
 
   async function save() {
-    if (!form.slug.trim()) return setError('El código de acceso no puede estar vacío')
+    if (!form.slug.trim()) return setError('El código de invitación no puede estar vacío')
     const slugClean = form.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-')
-    setSaving(true); setError(''); setSuccess(false)
+    setSaving(true); setError('')
     try {
-      const { error: err } = await supabase.from('providers').update({
+      const payload = {
         display_name: form.display_name || null,
         slug: slugClean,
         whatsapp_support: form.whatsapp_support || null,
         logo_url: form.logo_url || null,
-      }).eq('id', provider.id)
+      }
+      // El color solo se envía si cambió (requiere la columna brand_accent)
+      if (form.brand_accent !== (provider.brand_accent || DEFAULT_DUO)) payload.brand_accent = form.brand_accent
+      const { error: err } = await supabase.from('providers').update(payload).eq('id', provider.id)
       if (err) throw err
       await refreshProfile()
-      setSuccess(true)
-      setTimeout(() => setSuccess(false), 3000)
-    } catch (e) { setError(e.message) }
+      toast.success('Cambios guardados')
+    } catch (e) {
+      setError(e.message?.includes('brand_accent') ? 'Falta ejecutar los SQL 005 y 006 (colores de marca) en Supabase.' : e.message)
+    }
     setSaving(false)
   }
 
   function openMethod(pm) {
     const existing = methods.find(m => m.method_key === pm.key)
     setMethodModal({ ...pm, existing })
-    setMethodForm({ holder_name: existing?.holder_name || '', account_number: existing?.account_number || '' })
+    setMethodForm({ holder_name: existing?.holder_name || '', account_number: existing?.account_number || '', qr_url: existing?.qr_url || '' })
     setMethodError('')
   }
 
   async function saveMethod() {
-    if (!methodForm.holder_name.trim() || !methodForm.account_number.trim()) return setMethodError('Completa todos los campos')
+    if (!methodForm.holder_name.trim() || !methodForm.account_number.trim()) return setMethodError('Completa el titular y el número')
+    const qr = methodForm.qr_url.trim()
+    if (qr && !/^https:\/\//i.test(qr)) return setMethodError('El enlace del QR debe empezar con https://')
+    // El QR solo se envía si cambió (requiere el SQL 009)
+    const qrPatch = qr !== (methodModal.existing?.qr_url || '') ? { qr_url: qr || null } : {}
     setMethodSaving(true); setMethodError('')
     try {
       const existing = methodModal.existing
       if (existing) {
-        await supabase.from('payment_methods').update({
+        const { error: err } = await supabase.from('payment_methods').update({
           holder_name: methodForm.holder_name.trim(),
           account_number: methodForm.account_number.trim(),
           is_active: true,
           updated_at: new Date().toISOString(),
+          ...qrPatch,
         }).eq('id', existing.id)
+        if (err) throw err
       } else {
-        await supabase.from('payment_methods').insert({
+        const { error: err } = await supabase.from('payment_methods').insert({
           provider_id: provider.id,
           method_key: methodModal.key,
           holder_name: methodForm.holder_name.trim(),
           account_number: methodForm.account_number.trim(),
           is_active: true,
+          ...qrPatch,
         })
+        if (err) throw err
       }
       await fetchMethods()
+      toast.success(`${methodModal.label} guardado`)
       setMethodModal(null)
-    } catch (e) { setMethodError(e.message) }
+    } catch (e) { setMethodError(e.message?.includes('qr_url') ? 'Falta ejecutar el SQL 009 en Supabase para guardar el QR.' : e.message) }
     setMethodSaving(false)
   }
 
   async function toggleMethod(method) {
+    setMethods(prev => prev.map(m => m.id === method.id ? { ...m, is_active: !m.is_active } : m))
     await supabase.from('payment_methods').update({ is_active: !method.is_active }).eq('id', method.id)
+  }
+
+  async function deleteMethod(m) {
+    const ok = await confirm({ title: '¿Eliminar este método?', message: `${getMethodMeta(m.method_key).label} dejará de aparecer para tus distribuidores.`, danger: true, confirmText: 'Eliminar' })
+    if (!ok) return
+    await supabase.from('payment_methods').delete().eq('id', m.id)
     fetchMethods()
   }
 
-  async function deleteMethod(id) {
-    if (!confirm('¿Eliminar este método de pago?')) return
-    await supabase.from('payment_methods').delete().eq('id', id)
-    fetchMethods()
-  }
+  if (loading) return <PageLoader />
 
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={28} /></div>
+  const dirty = form.display_name !== (provider.display_name || '') || form.slug !== (provider.slug || '') ||
+    form.whatsapp_support !== (provider.whatsapp_support || '') || form.logo_url !== (provider.logo_url || '') ||
+    form.brand_accent !== (provider.brand_accent || DEFAULT_DUO)
 
   return (
-    <div>
-      <PageHeader title="Configuración" subtitle="Ajustes de tu tienda" />
+    <div className={dirty ? 'pb-24' : ''}>
+      <PageHeader title="Configuración" subtitle="Tu marca, cómo te encuentran tus distribuidores y cómo te pagan" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, maxWidth: 900 }}>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+        <div className="space-y-5">
+          {/* Marca */}
+          <section className="card p-5 sm:p-6">
+            <SectionTitle icon={<IconStore size={18} />} title="Tu marca" subtitle="Lo que ven tus distribuidores al entrar" />
 
-        {/* ── Datos de tienda ── */}
-        <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)' }}>
-              <IconSettings size={18} />
-            </div>
-            <div>
-              <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>Datos de tu tienda</p>
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Nombre, código y logo para tus distribuidores</p>
-            </div>
-          </div>
-
-          {/* Logo URL */}
-          <div>
-            <label className="label">Logo de tu tienda (URL)</label>
-            <input className="input" placeholder="https://i.postimg.cc/tu-imagen.png"
-              value={form.logo_url}
-              onChange={e => setForm(f => ({ ...f, logo_url: e.target.value }))} />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>
-              Sube tu imagen en <strong>postimages.org</strong> y pega el link directo aquí
-            </p>
-            {/* Preview */}
-            {form.logo_url && (
-              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--surface-overlay)', borderRadius: 10, border: '1px solid var(--surface-border)' }}>
-                <img src={form.logo_url} alt="preview"
-                  style={{ height: 40, maxWidth: 120, borderRadius: 8, objectFit: 'contain' }}
-                  onError={e => { e.target.style.display = 'none' }} />
-                <p style={{ fontSize: 11, color: 'var(--ink-muted)' }}>Vista previa del logo</p>
+            <div className="flex items-center gap-4 mb-5">
+              {form.logo_url
+                ? <img src={form.logo_url} alt="" className="w-16 h-16 rounded-2xl object-cover border border-[var(--surface-border)]" onError={e => { e.target.style.opacity = 0.2 }} />
+                : <span className="w-16 h-16 rounded-2xl bg-[var(--accent)] text-[var(--accent-ink)] grid place-items-center font-display text-2xl font-bold shadow-[inset_0_1px_0_var(--hl),0_3px_0_var(--a-edge)]">{(form.display_name || 'T')[0]}</span>}
+              <div className="min-w-0">
+                <p className="font-display text-xl text-[var(--ink)] truncate">{form.display_name || 'Tu tienda'}</p>
+                <p className="text-xs text-[var(--ink-faint)]">con {APP_FULL_NAME}</p>
               </div>
-            )}
-          </div>
-
-          <div>
-            <label className="label">Nombre de tu tienda</label>
-            <input className="input" placeholder="Mi Tienda Streaming" value={form.display_name}
-              onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
-          </div>
-
-          <div>
-            <label className="label">Código de acceso (slug)</label>
-            <input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="mi-tienda-123"
-              value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 5 }}>
-              Código para distribuidores: <span style={{ fontFamily: 'DM Mono, monospace', background: 'var(--surface-overlay)', padding: '1px 6px', borderRadius: 5 }}>{form.slug || 'tu-codigo'}</span>
-            </p>
-          </div>
-
-          <div>
-            <label className="label">WhatsApp de soporte / ventas</label>
-            <input className="input" placeholder="+51 999 999 999" value={form.whatsapp_support}
-              onChange={e => setForm(f => ({ ...f, whatsapp_support: e.target.value }))} />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>
-              El sistema usa este número cuando un distribuidor notifica al proveedor.
-            </p>
-          </div>
-
-          {error && <Alert type="error">{error}</Alert>}
-          {success && <Alert type="success">Configuración guardada correctamente</Alert>}
-
-          <button onClick={save} disabled={saving} className="btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
-            {saving ? <Spinner size={15} /> : 'Guardar cambios'}
-          </button>
-
-          <div style={{ borderTop: '1px solid var(--surface-border)', paddingTop: 14, display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 4 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--surface-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)', flexShrink: 0 }}>
-              <IconUsers size={16} />
             </div>
-            <div>
-              <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 13, color: 'var(--ink)', marginBottom: 4 }}>¿Cómo agregar distribuidores?</p>
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.6 }}>
-                Comparte tu código <span style={{ fontFamily: 'DM Mono, monospace', background: 'var(--surface-overlay)', padding: '1px 6px', borderRadius: 5 }}>{form.slug}</span> con tus distribuidores. Ellos se registran en <strong>/register</strong> e ingresan tu código.
-              </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="label">Nombre de la tienda</label>
+                <input className="input" placeholder="Mi Tienda Streaming" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Logo (URL)</label>
+                <input className="input" placeholder="https://i.postimg.cc/tu-logo.png" value={form.logo_url} onChange={e => setForm(f => ({ ...f, logo_url: e.target.value }))} />
+                <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Súbelo a postimages.org y pega el enlace directo.</p>
+              </div>
+
+              <BrandColors value={form.brand_accent} onChange={v => setForm(f => ({ ...f, brand_accent: v }))} />
             </div>
-          </div>
+          </section>
+
+          {/* Acceso */}
+          <section className="card p-5 sm:p-6">
+            <SectionTitle icon={<IconSettings size={18} />} title="Invitación y soporte" />
+            <div className="space-y-4">
+              <div>
+                <label className="label">Código de invitación</label>
+                <input className="input font-mono" placeholder="mi-tienda" value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} />
+                <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Tus distribuidores se registran en /register con este código. Solo letras, números y guiones.</p>
+              </div>
+              {provider.slug && <CopyField label="Enlace para compartir" value={`${window.location.origin}/register?codigo=${provider.slug}`} />}
+              <div>
+                <label className="label">WhatsApp de soporte y ventas</label>
+                <input className="input" placeholder="+51 999 999 999" value={form.whatsapp_support} onChange={e => setForm(f => ({ ...f, whatsapp_support: e.target.value }))} />
+                <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">A este número llegan los avisos de recargas, pedidos y tickets.</p>
+              </div>
+            </div>
+          </section>
         </div>
 
-        {/* ── Métodos de recarga ── */}
-        <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-muted)' }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>
-              </svg>
-            </div>
-            <div>
-              <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>Métodos de recarga</p>
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Tus distribuidores verán estos datos para recargar</p>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        <div className="space-y-5">
+        {/* Métodos de pago */}
+        <section className="card p-5 sm:p-6">
+          <SectionTitle
+            icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>}
+            title="Métodos de recarga"
+            subtitle="Tus distribuidores ven estos datos al recargar saldo"
+          />
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5 mb-5">
             {PAYMENT_METHODS.map(pm => {
               const saved = methods.find(m => m.method_key === pm.key)
               const isActive = saved?.is_active
               return (
                 <button key={pm.key} onClick={() => openMethod(pm)}
-                  style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                    padding: '12px 8px', borderRadius: 12, cursor: 'pointer',
-                    border: `1px solid ${isActive ? 'var(--status-green-border)' : saved ? 'var(--surface-border-strong)' : 'var(--surface-border)'}`,
-                    background: isActive ? 'var(--status-green-bg)' : saved ? 'var(--surface-overlay)' : 'transparent',
-                    transition: 'all 0.15s', position: 'relative',
-                  }}>
-                  <MethodLogo logo={pm.logo} label={pm.label} size={34} />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: isActive ? 'var(--status-green)' : 'var(--ink-muted)' }}>{pm.label}</span>
-                  {isActive && <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: 'var(--status-green)' }} />}
-                  {saved && !isActive && <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: 'var(--ink-faint)' }} />}
+                  className={`btn-secondary !h-auto !flex-col !gap-2 !py-3 relative ${isActive ? '!border-[var(--a-line)]' : ''}`}>
+                  <MethodLogo logo={pm.logo} label={pm.label} size={32} />
+                  <span className="text-[11.5px]">{pm.label}</span>
+                  {saved && <span className="absolute top-2 right-2 dot" style={{ color: isActive ? 'var(--a)' : 'var(--ink-faint)', boxShadow: isActive ? '0 0 8px var(--a)' : 'none' }} />}
                 </button>
               )
             })}
           </div>
 
-          {methods.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-faint)' }}>Configurados</p>
-              {methods.map(m => {
-                const pm = PAYMENT_METHODS.find(p => p.key === m.method_key)
-                return (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)' }}>
-                    <MethodLogo logo={pm?.logo || ''} label={pm?.label || m.method_key} size={26} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{pm?.label || m.method_key}</p>
-                      <p style={{ fontSize: 11, color: 'var(--ink-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.holder_name} · {m.account_number}</p>
-                    </div>
-                    <Toggle checked={m.is_active} onChange={() => toggleMethod(m)} />
-                    <button onClick={() => deleteMethod(m.id)} className="btn-ghost" style={{ padding: '4px 6px', color: 'var(--status-red)', flexShrink: 0 }}>
-                      <IconTrash size={13} />
-                    </button>
-                  </div>
-                )
-              })}
+          {methods.length > 0 ? (
+            <div>
+              <p className="eyebrow mb-2.5">Configurados</p>
+              <ul className="space-y-2">
+                {methods.map(m => {
+                  const pm = getMethodMeta(m.method_key)
+                  return (
+                    <li key={m.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 border border-[var(--surface-border)] bg-[var(--surface-side)]">
+                      <MethodLogo logo={pm.logo} label={pm.label} size={30} />
+                      <button className="flex-1 min-w-0 text-left" onClick={() => openMethod(pm)}>
+                        <p className="text-[13px] font-semibold text-[var(--ink)]">{pm.label}</p>
+                        <p className="text-[11.5px] text-[var(--ink-faint)] truncate">{m.holder_name} · <span className="font-mono">{m.account_number}</span></p>
+                      </button>
+                      <Toggle checked={m.is_active} onChange={() => toggleMethod(m)} />
+                      <button onClick={() => deleteMethod(m)} className="btn-ghost p-2 hover:!text-[var(--status-red)]" aria-label={`Eliminar ${pm.label}`}><IconTrash size={14} /></button>
+                    </li>
+                  )
+                })}
+              </ul>
             </div>
-          )}
-          {methods.length === 0 && (
-            <p style={{ fontSize: 12, color: 'var(--ink-faint)', textAlign: 'center', padding: '8px 0' }}>
-              Haz click en un método para configurarlo.
-            </p>
-          )}
+          ) : <p className="text-[13px] text-[var(--ink-muted)] text-center py-2">Toca un método para configurarlo.</p>}
+        </section>
+        <AssistantSettings />
         </div>
       </div>
 
-      {/* Modal método */}
-      <Modal open={!!methodModal} onClose={() => setMethodModal(null)} title={`Configurar ${methodModal?.label}`} maxWidth="max-w-sm">
+      {error && <div className="mt-5"><Alert type="error">{error}</Alert></div>}
+
+      {/* Barra de guardar (aparece al tener cambios) */}
+      {dirty && (
+        <div className="fixed bottom-0 inset-x-0 lg:left-[var(--sidebar-w)] z-40 p-3 sm:p-4 animate-slide-up" style={{ paddingBottom: 'calc(.75rem + env(safe-area-inset-bottom))' }}>
+          <div className="max-w-[1320px] mx-auto card flex items-center gap-3 px-4 py-3 !rounded-2xl shadow-[0_18px_44px_var(--shadow)]">
+            <span className="dot animate-pulse-soft" style={{ color: 'var(--b)' }} />
+            <p className="flex-1 text-sm text-[var(--ink-muted)]">Tienes cambios sin guardar</p>
+            <button onClick={() => setForm({ display_name: provider.display_name || '', slug: provider.slug || '', whatsapp_support: provider.whatsapp_support || '', logo_url: provider.logo_url || '', brand_accent: provider.brand_accent || DEFAULT_DUO })} className="btn-ghost btn-sm">Descartar</button>
+            <button onClick={save} disabled={saving} className="btn-primary btn-sm min-w-[96px]">{saving ? <Spinner size={14} /> : 'Guardar'}</button>
+          </div>
+        </div>
+      )}
+
+      <Modal
+        open={!!methodModal}
+        onClose={() => setMethodModal(null)}
+        title={methodModal ? `Configurar ${methodModal.label}` : ''}
+        subtitle="Tus distribuidores verán estos datos"
+        maxWidth="max-w-sm"
+        footer={<>
+          <button onClick={() => setMethodModal(null)} className="btn-ghost">Cancelar</button>
+          <button onClick={saveMethod} disabled={methodSaving} className="btn-primary min-w-[110px]">{methodSaving ? <Spinner size={15} /> : 'Guardar'}</button>
+        </>}
+      >
         {methodModal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--surface-overlay)', borderRadius: 10 }}>
-              <MethodLogo logo={methodModal.logo} label={methodModal.label} size={40} />
-              <div>
-                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--ink)' }}>{methodModal.label}</p>
-                <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Tus distribuidores verán esta información</p>
-              </div>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <MethodLogo logo={methodModal.logo} label={methodModal.label} size={44} />
+              <p className="font-display font-semibold text-lg text-[var(--ink)]">{methodModal.label}</p>
             </div>
             <div>
               <label className="label">Nombre del titular</label>
-              <input className="input" placeholder="Juan García López" value={methodForm.holder_name}
-                onChange={e => setMethodForm(f => ({ ...f, holder_name: e.target.value }))} />
+              <input className="input" placeholder="Juan García López" value={methodForm.holder_name} onChange={e => setMethodForm(f => ({ ...f, holder_name: e.target.value }))} />
             </div>
             <div>
               <label className="label">{methodModal.key === 'binance' ? 'ID de Binance Pay' : 'Número'}</label>
-              <input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder={methodModal.placeholder}
-                value={methodForm.account_number} onChange={e => setMethodForm(f => ({ ...f, account_number: e.target.value }))} />
+              <input className="input font-mono" placeholder={methodModal.placeholder} value={methodForm.account_number} onChange={e => setMethodForm(f => ({ ...f, account_number: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">QR de pago (URL, opcional)</label>
+              <div className="flex gap-3 items-center">
+                <input className="input flex-1" placeholder="https://i.postimg.cc/mi-qr.png" value={methodForm.qr_url} onChange={e => setMethodForm(f => ({ ...f, qr_url: e.target.value.trim() }))} />
+                {methodForm.qr_url && <img src={methodForm.qr_url} alt="" className="w-12 h-12 rounded-lg object-cover bg-white border border-[var(--surface-border)] flex-shrink-0" onError={e => { e.currentTarget.style.opacity = .2 }} />}
+              </div>
+              <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Tus distribuidores lo ven al recargar y en el asistente. Súbelo a postimages.org y pega el enlace directo.</p>
             </div>
             {methodModal.existing && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--surface-overlay)', borderRadius: 10 }}>
-                <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>Visible para distribuidores</span>
-                <Toggle
-                  checked={methods.find(m => m.id === methodModal.existing.id)?.is_active ?? true}
-                  onChange={() => { toggleMethod(methodModal.existing); setMethodModal(null) }}
-                />
+              <div className="flex items-center justify-between inset px-3.5 py-2.5">
+                <span className="text-sm text-[var(--ink-muted)]">Visible para distribuidores</span>
+                <Toggle checked={methods.find(m => m.id === methodModal.existing.id)?.is_active ?? true} onChange={() => { toggleMethod(methodModal.existing); setMethodModal(null) }} />
               </div>
             )}
             {methodError && <Alert type="error">{methodError}</Alert>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setMethodModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-              <button onClick={saveMethod} disabled={methodSaving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                {methodSaving ? <Spinner size={15} /> : 'Guardar'}
-              </button>
-            </div>
           </div>
         )}
       </Modal>

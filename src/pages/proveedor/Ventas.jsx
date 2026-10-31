@@ -1,31 +1,43 @@
+import { useLocation } from 'react-router-dom'
+import { rpcError } from '@/lib/rpcError'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useSettings } from '@/hooks/useSettings'
-import { PageHeader, Modal, Alert, Spinner, Badge, Tabs } from '@/components/ui'
-import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash, IconWhatsApp } from '@/assets/icons'
-import { formatUSD, formatDateTime, formatDate, getStatusColor, getStatusLabel, getLogoPath } from '@/utils'
+import { PageHeader, Modal, Alert, Spinner, Badge, Tabs, PageLoader, EmptyState, useToast } from '@/components/ui'
+import { PlatformLogo } from '@/utils/platform'
+import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash, IconWhatsApp, IconX, IconTrendingUp } from '@/assets/icons'
+import { formatUSD, formatDateTime, formatDate, getStatusLabel } from '@/utils'
+import { waLink } from '@/lib/whatsapp'
 
 function CopyBtn({ value }) {
   const [copied, setCopied] = useState(false)
   if (!value) return null
   return (
-    <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
-      title="Copiar" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: copied ? 'var(--status-green)' : 'var(--ink-faint)', flexShrink: 0 }}>
+    <button
+      onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
+      title="Copiar" aria-label="Copiar"
+      className={`p-1 rounded-md flex-shrink-0 transition-colors ${copied ? 'text-[var(--a)]' : 'text-[var(--ink-faint)] hover:text-[var(--ink)]'}`}
+    >
       {copied
-        ? <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        : <IconCopy size={11} />}
+        ? <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        : <IconCopy size={12} />}
     </button>
   )
 }
 
+const STATUS_BADGE = { activo: 'green', pendiente_credenciales: 'violet', expirado: 'neutral', cancelado: 'red' }
+
 export default function ProveedorVentas() {
   const { provider } = useAuth()
   const { settings } = useSettings()
+  const toast = useToast()
+  const [visible, setVisible] = useState(40)
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState('all')
+  const location = useLocation()
+  const [tab, setTab] = useState(location.state?.tab || 'all')
   const [modal, setModal] = useState(null)
   const [renewModal, setRenewModal] = useState(null)
   const [renewDays, setRenewDays] = useState(30)
@@ -146,6 +158,7 @@ const stocks = allStocks
         type: 'success', ref_id: modal.id,
       })
       setModal(null); fetchOrders()
+      toast.success('Credenciales guardadas y distribuidor notificado')
     } catch (e) { setSaveError(e.message) }
     setSaving(false)
   }
@@ -171,26 +184,11 @@ const stocks = allStocks
     if (renewBalance < cost) return setSaveError(`Saldo insuficiente. El distribuidor tiene ${formatUSD(renewBalance)} y el costo es ${formatUSD(cost)}.`)
     setSaving(true); setSaveError('')
     try {
-      const currentExpiry = renewModal.expires_at ? new Date(renewModal.expires_at) : new Date()
-      const base = currentExpiry > new Date() ? currentExpiry : new Date()
-      base.setDate(base.getDate() + parseInt(renewDays))
-      const { error: oErr } = await supabase.from('orders').update({
-        expires_at: base.toISOString(), status: 'activo', updated_at: new Date().toISOString(),
-      }).eq('id', renewModal.id)
-      if (oErr) throw oErr
-      await supabase.from('balances').update({ amount_usd: renewBalance - cost }).eq('user_id', renewModal.distributor_id)
-      await supabase.from('transactions').insert({
-        user_id: renewModal.distributor_id, type: 'compra', amount_usd: -cost,
-        ref_order_id: renewModal.id,
-        description: `Renovación: ${renewModal.products?.name} (+${renewDays} días)`,
-      })
-      await supabase.from('notifications').insert({
-        user_id: renewModal.distributor_id,
-        title: 'Suscripción renovada',
-        message: `Tu pedido ${renewModal.order_code} fue renovado por ${renewDays} días. Nueva fecha: ${formatDate(base.toISOString())}`,
-        type: 'success', ref_id: renewModal.id,
-      })
+      // Cobro + nueva fecha + movimiento + aviso en un solo paso (el costo lo calcula la base de datos)
+      const { error: rpcErr } = await supabase.rpc('renew_order', { p_order: renewModal.id, p_days: parseInt(renewDays), p_charge: true })
+      if (rpcErr) throw new Error(rpcError(rpcErr))
       setRenewModal(null); fetchOrders()
+      toast.success(`Renovado por ${renewDays} días`)
     } catch (e) { setSaveError(e.message) }
     setSaving(false)
   }
@@ -211,7 +209,8 @@ const stocks = allStocks
       await supabase.from('orders').delete().eq('id', order.id)
       setOrders(prev => prev.filter(o => o.id !== order.id))
       setDeleteModal(null)
-    } catch (e) { alert('Error: ' + e.message) }
+      toast.success('Pedido eliminado')
+    } catch (e) { toast.error('Error: ' + e.message) }
     setDeleting(false)
   }
 
@@ -226,7 +225,8 @@ const stocks = allStocks
       }
       setOrders(prev => prev.filter(o => o.id !== order.id))
       setDeleteModal(null)
-    } catch (e) { alert('Error: ' + e.message) }
+      toast.success('Pedido eliminado')
+    } catch (e) { toast.error('Error: ' + e.message) }
     setDeleting(false)
   }
 
@@ -264,291 +264,289 @@ const stocks = allStocks
   const showProfile = dt === 'perfil'
   const showCode = dt === 'codigo'
 
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spinner size={28} /></div>
+  if (loading) return <PageLoader />
+
+  const rate = parseFloat(settings?.exchange_rate) || 3.5
+
+  // Datos derivados por pedido (estado real, vence pronto, aviso por WhatsApp)
+  function meta(o) {
+    const isReallyExpired = o.status === 'activo' && o.expires_at && new Date(o.expires_at) < new Date()
+    const displayStatus = isReallyExpired ? 'expirado' : o.status
+    const expiresSoon = o.status === 'activo' && o.expires_at && !isReallyExpired && (new Date(o.expires_at) - new Date()) < 3 * 864e5
+    const canDelete = o.status === 'expirado' || o.status === 'cancelado' || isReallyExpired
+    let waUrl = null
+    if (expiresSoon && o.user?.phone) {
+      const phone = o.user.phone.replace(/\D/g, '')
+      const daysLeft = Math.ceil((new Date(o.expires_at) - new Date()) / 864e5)
+      const costPen = (parseFloat(o.products?.renewal_price_usd || o.price_paid) * rate).toFixed(2)
+      const msg =
+        `Hola *${o.client_name || o.user?.full_name || 'cliente'}*!\n\n` +
+        `Tu acceso a *${o.products?.name}* vence ${daysLeft <= 1 ? 'hoy' : `en *${daysLeft} dias*`}.\n\n` +
+        (o.stock_item?.email ? `Correo: ${o.stock_item.email}\n` : '') +
+        (o.stock_item?.password ? `Contrasena: ${o.stock_item.password}\n` : '') +
+        `\nCosto de renovacion: *S/ ${costPen}*\n\n` +
+        `Para renovar, contactanos. Gracias!`
+      waUrl = waLink(phone, msg)
+    }
+    return { isReallyExpired, displayStatus, expiresSoon, canDelete, waUrl }
+  }
+
+  function Actions({ o, m }) {
+    const pending = o.status === 'pendiente_credenciales'
+    return (
+      <div className="flex items-center gap-1.5 justify-end flex-wrap">
+        <button onClick={() => openCredentials(o)} className={`btn-sm ${pending ? 'btn-primary' : 'btn-secondary'}`}>
+          <IconEdit size={13} />{pending ? 'Cargar' : 'Editar'}
+        </button>
+        {(o.status === 'activo' || o.status === 'expirado' || m.isReallyExpired) && (
+          <button onClick={() => openRenew(o)} className="btn-accent btn-sm btn-icon" title="Renovar" aria-label="Renovar"><IconRefreshCw size={14} /></button>
+        )}
+        {m.waUrl && (
+          <a href={m.waUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm btn-icon !text-[var(--status-yellow)]" title="Avisar renovación por WhatsApp" aria-label="Avisar renovación por WhatsApp"><IconWhatsApp size={14} /></a>
+        )}
+        {m.canDelete && (
+          <button onClick={() => setDeleteModal(o)} className="btn-secondary btn-sm btn-icon hover:!text-[var(--status-red)]" title="Eliminar pedido" aria-label="Eliminar pedido"><IconTrash size={14} /></button>
+        )}
+      </div>
+    )
+  }
+
+  function Expiry({ o, m }) {
+    if (!o.expires_at) return <span className="text-xs text-[var(--ink-faint)]">Sin fecha</span>
+    return (
+      <span className={`text-xs font-medium ${m.isReallyExpired ? 'text-[var(--status-red)]' : m.expiresSoon ? 'text-[var(--status-yellow)]' : 'text-[var(--ink-muted)]'}`}>
+        {m.isReallyExpired ? 'Venció ' : 'Vence '}{formatDate(o.expires_at)}
+        {m.expiresSoon && <span className="ml-1.5 dot inline-block align-middle animate-pulse-soft" />}
+      </span>
+    )
+  }
+
+  const shown = filtered.slice(0, visible)
 
   return (
     <div>
-      <PageHeader title="Ventas"
+      <PageHeader
+        title="Ventas"
         subtitle={`${orders.length} pedidos · ${formatUSD(totalRevenue)} en ingresos`}
-        action={<button className="btn-secondary" onClick={exportCSV} style={{ fontSize: 13 }}><IconDownload size={15} />CSV</button>}
+        action={<button className="btn-secondary" onClick={exportCSV}><IconDownload size={15} />Exportar CSV</button>}
       />
 
       {pendingCount > 0 && (
-        <div style={{ background: 'var(--status-yellow-bg)', border: '1px solid var(--status-yellow-border)', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--status-yellow)' }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }} />
-          <strong>{pendingCount} pedido{pendingCount > 1 ? 's' : ''} pendiente{pendingCount > 1 ? 's' : ''}</strong> — haz click en <strong>Cargar</strong> para subir credenciales.
-        </div>
+        <button onClick={() => setTab('pendiente_credenciales')} className="w-full mb-5 flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-left border bg-[var(--b-soft)] border-[var(--b-line)] text-[var(--ink)] animate-slide-up hover:brightness-105">
+          <span className="dot dot-glow animate-pulse-soft" style={{ color: 'var(--b)' }} />
+          <span className="flex-1"><strong>{pendingCount} pedido{pendingCount > 1 ? 's' : ''} esperando credenciales.</strong> <span className="text-[var(--ink-muted)]">Tócalo para verlos y cargarlas.</span></span>
+          <span className="text-[var(--b)] font-semibold">Ver →</span>
+        </button>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
-          <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
-          <input className="input" style={{ paddingLeft: 36 }}
-            placeholder="Buscar pedido, cliente, producto, distribuidor o correo..."
-            value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
+      <div className="flex flex-col lg:flex-row gap-3 mb-4">
+        <label className="relative flex-1">
+          <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)] pointer-events-none" />
+          <input className="input input-icon" placeholder="Pedido, cliente, producto, distribuidor o correo" value={search} onChange={e => { setSearch(e.target.value); setVisible(40) }} aria-label="Buscar ventas" />
+          {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 btn-ghost p-1.5" aria-label="Limpiar"><IconX size={14} /></button>}
+        </label>
         <Tabs tabs={[
-          { label: 'Todos', value: 'all' },
+          { label: 'Todos', value: 'all', count: orders.length },
           { label: 'Activos', value: 'activo' },
           { label: 'Pendientes', value: 'pendiente_credenciales', count: pendingCount },
           { label: 'Expirados', value: 'expirado' },
-        ]} active={tab} onChange={setTab} />
+        ]} active={tab} onChange={v => { setTab(v); setVisible(40) }} />
       </div>
 
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Pedido</th><th>Producto</th><th>Distribuidor</th><th>Cliente</th>
-              <th>Correo plataforma</th><th>Precio</th><th>Estado</th><th>Inicio</th><th>Vence</th><th>Creds</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(o => {
-              const isReallyExpired = o.status === 'activo' && o.expires_at && new Date(o.expires_at) < new Date()
-              const displayStatus = isReallyExpired ? 'expirado' : o.status
-              const expiresSoon = o.status === 'activo' && o.expires_at && !isReallyExpired &&
-                (new Date(o.expires_at) - new Date()) < 3 * 24 * 60 * 60 * 1000
-              const canDelete = o.status === 'expirado' || o.status === 'cancelado' || isReallyExpired
+      {filtered.length === 0 ? (
+        <div className="card"><EmptyState icon={IconTrendingUp} title="Sin resultados" description={search ? `Nada coincide con "${search}".` : 'No hay pedidos en esta categoría.'} /></div>
+      ) : (
+        <>
+          {/* Escritorio: tabla */}
+          <div className="table-wrapper hidden lg:block">
+            <table>
+              <thead>
+                <tr><th>Producto</th><th>Distribuidor · cliente</th><th>Precio</th><th>Estado</th><th className="!text-right">Acciones</th></tr>
+              </thead>
+              <tbody>
+                {shown.map(o => {
+                  const m = meta(o)
+                  return (
+                    <tr key={o.id}>
+                      <td className="max-w-[320px]">
+                        <div className="flex items-center gap-3">
+                          <PlatformLogo name={o.products?.platforms?.name} filename={o.products?.platforms?.logo_filename} size={36} />
+                          <div className="min-w-0">
+                            <p className="font-medium text-[13.5px] truncate">{o.products?.name}</p>
+                            <div className="flex items-center gap-1 min-w-0">
+                              <span className="font-mono text-[11px] text-[var(--ink-faint)] truncate">{o.stock_item?.email || o.order_code}</span>
+                              <CopyBtn value={o.stock_item?.email} />
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="max-w-[220px]">
+                        <p className="text-[13px] truncate">{o.user?.full_name || o.user?.email}</p>
+                        <p className="text-xs text-[var(--ink-faint)] truncate">{o.client_name || 'Sin cliente'} · {formatDateTime(o.created_at)}</p>
+                      </td>
+                      <td><span className="font-mono">{formatUSD(o.price_paid)}</span></td>
+                      <td>
+                        <Badge color={STATUS_BADGE[m.displayStatus] || 'neutral'} dot>{getStatusLabel(m.displayStatus)}</Badge>
+                        <div className="mt-1"><Expiry o={o} m={m} /></div>
+                      </td>
+                      <td><Actions o={o} m={m} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Móvil y tablet: tarjetas */}
+          <div className="lg:hidden space-y-3">
+            {shown.map(o => {
+              const m = meta(o)
               return (
-                <tr key={o.id}>
-                  <td><span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink-muted)' }}>#{o.order_code}</span></td>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <img src={getLogoPath(o.products?.platforms?.logo_filename)} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
-                      <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.products?.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--ink-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.user?.full_name || o.user?.email}</td>
-                  <td style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{o.client_name || '—'}</td>
-                  <td>
-                    {o.stock_item?.email ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, maxWidth: 170 }}>
-                        <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.stock_item.email}</span>
-                        <CopyBtn value={o.stock_item.email} />
+                <article key={o.id} className="card p-4">
+                  <div className="flex items-start gap-3">
+                    <PlatformLogo name={o.products?.platforms?.name} filename={o.products?.platforms?.logo_filename} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-semibold text-[14.5px] text-[var(--ink)] truncate">{o.products?.name}</p>
+                        <span className="font-mono text-sm flex-shrink-0">{formatUSD(o.price_paid)}</span>
                       </div>
-                    ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
-                  </td>
-                  <td><span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700 }}>{formatUSD(o.price_paid)}</span></td>
-                  <td><Badge color={getStatusColor(displayStatus)} dot>{getStatusLabel(displayStatus)}</Badge></td>
-                  <td style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{formatDateTime(o.created_at)}</td>
-                  <td>
-                    {o.expires_at ? (
-                      <span style={{ fontSize: 11, fontWeight: 500, color: isReallyExpired ? 'var(--status-red)' : expiresSoon ? 'var(--status-yellow)' : 'var(--ink-muted)' }}>
-                        {formatDate(o.expires_at)}
-                        {expiresSoon && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-yellow)' }}>Vence pronto</span>}
-                        {isReallyExpired && <span style={{ display: 'block', fontSize: 10, color: 'var(--status-red)' }}>Vencida</span>}
-                      </span>
-                    ) : <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>—</span>}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button onClick={() => openCredentials(o)} className="btn-secondary"
-                        style={{ fontSize: 11, padding: '5px 10px', gap: 4,
-                          background: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-bg)' : undefined,
-                          borderColor: o.status === 'pendiente_credenciales' ? 'var(--status-yellow-border)' : undefined,
-                          color: o.status === 'pendiente_credenciales' ? 'var(--status-yellow)' : undefined }}>
-                        <IconEdit size={12} />{o.status === 'pendiente_credenciales' ? 'Cargar' : 'Editar'}
-                      </button>
-                      {(o.status === 'activo' || o.status === 'expirado' || isReallyExpired) && (
-                        <button onClick={() => openRenew(o)} className="btn-secondary"
-                          style={{ fontSize: 11, padding: '5px 10px', gap: 4, color: 'var(--status-green)', borderColor: 'var(--status-green-border)', background: 'var(--status-green-bg)' }}>
-                          <IconRefreshCw size={12} />Renovar
-                        </button>
-                      )}
-                      {/* ── WA notificar renovación: solo cuando vence en ≤3 días ── */}
-                      {expiresSoon && o.user?.phone && (() => {
-                        const phone = o.user.phone.replace(/\D/g, '')
-                        const daysLeft = Math.ceil((new Date(o.expires_at) - new Date()) / (1000 * 60 * 60 * 24))
-                        const costUsd = parseFloat(o.products?.renewal_price_usd || o.price_paid)
-                        const costPen = (costUsd * (parseFloat(settings?.exchange_rate) || 3.5)).toFixed(2)
-                        const msg =
-                          `Hola *${o.client_name || o.user?.full_name || 'cliente'}*!\n\n` +
-                          `Tu acceso a *${o.products?.name}* vence ${daysLeft <= 1 ? 'hoy' : `en *${daysLeft} dias*`}.\n\n` +
-                          (o.stock_item?.email ? `Correo: ${o.stock_item.email}\n` : '') +
-                          (o.stock_item?.password ? `Contrasena: ${o.stock_item.password}\n` : '') +
-                          `\nCosto de renovacion: *S/ ${costPen}*\n\n` +
-                          `Para renovar, contactanos. Gracias!`
-                        return (
-                          <a href={`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`}
-                            target="_blank" rel="noreferrer"
-                            title="Notificar renovacion por WhatsApp"
-                            style={{ fontSize: 11, padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, background: '#25d366', color: '#fff', fontWeight: 600, fontFamily: 'DM Sans, sans-serif', textDecoration: 'none', flexShrink: 0 }}>
-                            <IconWhatsApp size={12} />
-                          </a>
-                        )
-                      })()}
-                      {/* ── Eliminar: solo en expirados y cancelados ── */}
-                      {canDelete && (
-                        <button onClick={() => setDeleteModal(o)}
-                          style={{ fontSize: 11, padding: '5px 8px', gap: 4, display: 'flex', alignItems: 'center', borderRadius: 8, background: 'var(--status-red-bg)', border: '1px solid var(--status-red-border)', color: 'var(--status-red)', cursor: 'pointer' }}
-                          title="Eliminar pedido">
-                          <IconTrash size={12} />
-                        </button>
+                      <p className="text-xs text-[var(--ink-muted)] truncate">{o.user?.full_name || o.user?.email} → {o.client_name || 'sin cliente'}</p>
+                      {o.stock_item?.email && (
+                        <div className="flex items-center gap-1 mt-0.5 min-w-0">
+                          <span className="font-mono text-[11px] text-[var(--ink-faint)] truncate">{o.stock_item.email}</span>
+                          <CopyBtn value={o.stock_item.email} />
+                        </div>
                       )}
                     </div>
-                  </td>
-                </tr>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-[var(--surface-border)]">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge color={STATUS_BADGE[m.displayStatus] || 'neutral'} dot>{getStatusLabel(m.displayStatus)}</Badge>
+                      <Expiry o={o} m={m} />
+                    </div>
+                    <Actions o={o} m={m} />
+                  </div>
+                </article>
               )
             })}
-            {filtered.length === 0 && (
-              <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--ink-faint)', padding: 32 }}>Sin resultados</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </div>
+
+          {visible < filtered.length && (
+            <div className="flex flex-col items-center gap-2 mt-5">
+              <button className="btn-secondary" onClick={() => setVisible(v => v + 40)}>Mostrar más</button>
+              <p className="text-xs text-[var(--ink-faint)]">Mostrando {shown.length} de {filtered.length}</p>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Modal credenciales */}
-      <Modal open={!!modal} onClose={() => setModal(null)} title={`${modal?.stock_item_id ? 'Editar' : 'Cargar'} credenciales — ${modal?.order_code}`} maxWidth="max-w-md">
+      <Modal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        title={`${modal?.stock_item_id ? 'Editar' : 'Cargar'} credenciales`}
+        subtitle={modal ? `${modal.products?.name} · ${modal.order_code}` : ''}
+        maxWidth="max-w-md"
+        footer={<>
+          <button onClick={() => setModal(null)} className="btn-ghost">Cancelar</button>
+          <button onClick={saveCredentials} disabled={saving} className="btn-primary min-w-[160px]">{saving ? <Spinner size={15} /> : 'Guardar y notificar'}</button>
+        </>}
+      >
         {modal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
-              <p style={{ fontWeight: 600, color: 'var(--ink)' }}>{modal.products?.name}</p>
-              <p style={{ color: 'var(--ink-muted)' }}>Cliente: {modal.client_name || '—'} {modal.client_whatsapp ? `· ${modal.client_whatsapp}` : ''}</p>
+          <div className="space-y-4">
+            <div className="inset px-3.5 py-2.5 text-[13px] text-[var(--ink-muted)]">
+              Cliente: <span className="text-[var(--ink)] font-medium">{modal.client_name || '—'}</span>{modal.client_whatsapp ? ` · ${modal.client_whatsapp}` : ''}
             </div>
-            {showEmail && <div><label className="label">Correo</label><input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="correo@ejemplo.com" value={credsForm.email} onChange={e => setCredsForm(f => ({ ...f, email: e.target.value }))} /></div>}
-            {showPassword && <div><label className="label">Contraseña</label><input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="contraseña" value={credsForm.password} onChange={e => setCredsForm(f => ({ ...f, password: e.target.value }))} /></div>}
-            {showUrl && <div><label className="label">URL</label><input className="input" style={{ fontFamily: 'DM Mono, monospace', fontSize: 12 }} placeholder="http://..." value={credsForm.url} onChange={e => setCredsForm(f => ({ ...f, url: e.target.value }))} /></div>}
+            {showEmail && <div><label className="label">Correo</label><input className="input font-mono" placeholder="correo@ejemplo.com" value={credsForm.email} onChange={e => setCredsForm(f => ({ ...f, email: e.target.value }))} /></div>}
+            {showPassword && <div><label className="label">Contraseña</label><input className="input font-mono" placeholder="contraseña" value={credsForm.password} onChange={e => setCredsForm(f => ({ ...f, password: e.target.value }))} /></div>}
+            {showUrl && <div><label className="label">URL</label><input className="input font-mono !text-[13px]" placeholder="http://..." value={credsForm.url} onChange={e => setCredsForm(f => ({ ...f, url: e.target.value }))} /></div>}
             {showProfile && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div><label className="label">Perfil</label><input className="input" placeholder="Mi Perfil" value={credsForm.profile_name} onChange={e => setCredsForm(f => ({ ...f, profile_name: e.target.value }))} /></div>
-                <div><label className="label">PIN</label><input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="1234" value={credsForm.profile_pin} onChange={e => setCredsForm(f => ({ ...f, profile_pin: e.target.value }))} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label">Perfil</label><input className="input" placeholder="Perfil 1" value={credsForm.profile_name} onChange={e => setCredsForm(f => ({ ...f, profile_name: e.target.value }))} /></div>
+                <div><label className="label">PIN</label><input className="input font-mono" placeholder="1234" value={credsForm.profile_pin} onChange={e => setCredsForm(f => ({ ...f, profile_pin: e.target.value }))} /></div>
               </div>
             )}
-            {showCode && <div><label className="label">Código</label><input className="input" style={{ fontFamily: 'DM Mono, monospace' }} placeholder="XXXX-XXXX" value={credsForm.activation_code} onChange={e => setCredsForm(f => ({ ...f, activation_code: e.target.value }))} /></div>}
-            {dt === 'activacion_tv' && <Alert type="info">Activación TV: pide al cliente el código de su televisor e ingrésalo en notas.</Alert>}
-            <div><label className="label">Nota para el distribuidor (opcional)</label>
-              <textarea className="input" rows={2} style={{ resize: 'none' }} placeholder="Instrucciones adicionales..." value={credsForm.extra_notes} onChange={e => setCredsForm(f => ({ ...f, extra_notes: e.target.value }))} />
+            {showCode && <div><label className="label">Código</label><input className="input font-mono" placeholder="XXXX-XXXX" value={credsForm.activation_code} onChange={e => setCredsForm(f => ({ ...f, activation_code: e.target.value }))} /></div>}
+            {dt === 'activacion_tv' && <Alert type="info">Activación TV: pide al cliente el código de su televisor e ingrésalo en la nota.</Alert>}
+            <div>
+              <label className="label">Nota para el distribuidor (opcional)</label>
+              <textarea className="input" rows={2} placeholder="Instrucciones adicionales..." value={credsForm.extra_notes} onChange={e => setCredsForm(f => ({ ...f, extra_notes: e.target.value }))} />
             </div>
             {saveError && <Alert type="error">{saveError}</Alert>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-              <button onClick={saveCredentials} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                {saving ? <Spinner size={15} /> : 'Guardar y notificar'}
-              </button>
-            </div>
           </div>
         )}
       </Modal>
 
       {/* Modal renovar */}
-      <Modal open={!!renewModal} onClose={() => { setRenewModal(null); setSaveError('') }} title={`Renovar — ${renewModal?.order_code}`} maxWidth="max-w-sm">
+      <Modal open={!!renewModal} onClose={() => { setRenewModal(null); setSaveError('') }} title="Renovar pedido" subtitle={renewModal ? `${renewModal.products?.name} · ${renewModal.order_code}` : ''} maxWidth="max-w-sm">
         {renewModal && (() => {
           const cost = getRenewalCost(renewModal)
           const hasDiff = renewModal.products?.is_renewable && renewModal.products?.renewal_price_usd &&
             parseFloat(renewModal.products.renewal_price_usd) !== parseFloat(renewModal.price_paid)
           const canRenew = renewBalance >= cost
+          const newDate = (() => {
+            const base = renewModal.expires_at && new Date(renewModal.expires_at) > new Date() ? new Date(renewModal.expires_at) : new Date()
+            base.setDate(base.getDate() + parseInt(renewDays))
+            return formatDate(base.toISOString())
+          })()
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '12px 14px' }}>
-                <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13 }}>{renewModal.products?.name}</p>
-                <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>Cliente: {renewModal.client_name || '—'}</p>
-                {renewModal.expires_at && (
-                  <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>
-                    Vence actualmente: <strong style={{ color: 'var(--ink)' }}>{formatDate(renewModal.expires_at)}</strong>
-                  </p>
-                )}
+            <div className="space-y-4">
+              <div className="inset px-3.5 py-3 text-[13px] text-[var(--ink-muted)] space-y-0.5">
+                <p>Cliente: <span className="text-[var(--ink)]">{renewModal.client_name || '—'}</span></p>
+                {renewModal.expires_at && <p>Vence: <span className="text-[var(--ink)]">{formatDate(renewModal.expires_at)}</span></p>}
               </div>
-              {hasDiff && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', borderRadius: 10, fontSize: 12, color: 'var(--status-green)' }}>
-                  <IconRefreshCw size={13} />
-                  <span>Precio especial de renovación: <strong>{formatUSD(cost)}</strong> (original: {formatUSD(renewModal.price_paid)})</span>
+              {hasDiff && <Alert type="success">Precio de renovación: <strong>{formatUSD(cost)}</strong> (original {formatUSD(renewModal.price_paid)})</Alert>}
+
+              <div>
+                <p className="label">Días a agregar</p>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[7, 15, 30, 60, 90].map(d => (
+                    <button key={d} onClick={() => setRenewDays(d)} className={`btn-secondary btn-sm !px-0 ${parseInt(renewDays) === d ? 'is-down !text-[var(--a)]' : ''}`}>{d}</button>
+                  ))}
                 </div>
-              )}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: canRenew ? 'var(--status-green-bg)' : 'var(--status-red-bg)', border: `1px solid ${canRenew ? 'var(--status-green-border)' : 'var(--status-red-border)'}` }}>
-                <div>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Saldo del distribuidor</p>
-                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: canRenew ? 'var(--status-green)' : 'var(--status-red)' }}>{formatUSD(renewBalance)}</p>
+                <p className="text-xs text-[var(--ink-faint)] mt-2">Nueva fecha: <span className="text-[var(--ink)] font-medium">{newDate}</span></p>
+              </div>
+
+              <div className={`grid grid-cols-2 rounded-xl border overflow-hidden ${canRenew ? 'border-[var(--a-line)]' : 'border-[var(--status-red-border)]'}`}>
+                <div className={`p-3 ${canRenew ? 'bg-[var(--a-soft)]' : 'bg-[var(--status-red-bg)]'}`}>
+                  <p className="eyebrow !text-[10px]">Saldo distribuidor</p>
+                  <p className={`font-mono text-lg mt-1 ${canRenew ? 'text-[var(--a)]' : 'text-[var(--status-red)]'}`}>{formatUSD(renewBalance)}</p>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Costo renovación</p>
-                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>{formatUSD(cost)}</p>
+                <div className="p-3 text-right">
+                  <p className="eyebrow !text-[10px]">Costo</p>
+                  <p className="font-mono text-lg mt-1 text-[var(--ink)]">{formatUSD(cost)}</p>
                 </div>
               </div>
               {!canRenew && <Alert type="error">Saldo insuficiente. Recárgale saldo al distribuidor primero.</Alert>}
-              <div>
-                <label className="label">Días a agregar</label>
-                <select className="input" value={renewDays} onChange={e => setRenewDays(e.target.value)}>
-                  {[7, 15, 30, 60, 90].map(d => <option key={d} value={d}>{d} días</option>)}
-                </select>
-                {renewModal.expires_at && (
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 5 }}>
-                    Nueva fecha: <strong style={{ color: 'var(--ink)' }}>
-                      {(() => {
-                        const base = new Date(renewModal.expires_at) > new Date() ? new Date(renewModal.expires_at) : new Date()
-                        base.setDate(base.getDate() + parseInt(renewDays))
-                        return formatDate(base.toISOString())
-                      })()}
-                    </strong>
-                  </p>
-                )}
-              </div>
               {saveError && <Alert type="error">{saveError}</Alert>}
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => { setRenewModal(null); setSaveError('') }} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-                <button onClick={confirmRenew} disabled={saving || !canRenew} className="btn-primary"
-                  style={{ flex: 1, justifyContent: 'center', background: 'var(--status-green)', opacity: !canRenew ? 0.4 : 1 }}>
-                  {saving ? <Spinner size={15} /> : `Renovar y descontar ${formatUSD(cost)}`}
-                </button>
+              <div className="flex gap-2.5">
+                <button onClick={() => { setRenewModal(null); setSaveError('') }} className="btn-ghost flex-1 justify-center">Cancelar</button>
+                <button onClick={confirmRenew} disabled={saving || !canRenew} className="btn-primary flex-[2]">{saving ? <Spinner size={15} /> : `Renovar · ${formatUSD(cost)}`}</button>
               </div>
             </div>
           )
         })()}
       </Modal>
-      {/* ── Modal opciones de eliminación ── */}
-      <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title={`Pedido ${deleteModal?.order_code}`} maxWidth="max-w-sm">
+
+      {/* Modal eliminar */}
+      <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title="¿Qué hacemos con este pedido?" subtitle={deleteModal ? `${deleteModal.products?.name} · ${deleteModal.order_code}` : ''} maxWidth="max-w-sm">
         {deleteModal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Info del pedido */}
-            <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
-              <p style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{deleteModal.products?.name}</p>
-              <p style={{ color: 'var(--ink-muted)' }}>
-                Cliente: {deleteModal.client_name || '—'}
-                {deleteModal.stock_item?.email && <> · <span style={{ fontFamily: 'DM Mono, monospace' }}>{deleteModal.stock_item.email}</span></>}
-              </p>
-            </div>
-
-            <p style={{ fontSize: 13, color: 'var(--ink-muted)' }}>¿Qué deseas hacer con este pedido?</p>
-
-            {/* Opción 1: devolver a stock */}
-            <button
-              onClick={() => releaseToStock(deleteModal)}
-              disabled={deleting}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px', borderRadius: 12, background: 'var(--status-green-bg)', border: '1px solid var(--status-green-border)', cursor: 'pointer', textAlign: 'left', fontFamily: 'DM Sans, sans-serif', width: '100%' }}>
-              <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--status-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {deleting ? <Spinner size={15} /> : (
-                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
-                  </svg>
-                )}
-              </div>
-              <div>
-                <p style={{ fontWeight: 700, fontSize: 13, color: 'var(--status-green)', marginBottom: 3 }}>Devolver al stock</p>
-                <p style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5 }}>
-                  Las credenciales quedan disponibles para vender de nuevo. El pedido se elimina pero el stock item se libera.
-                </p>
-              </div>
+          <div className="space-y-3">
+            <button onClick={() => releaseToStock(deleteModal)} disabled={deleting} className="w-full text-left flex items-start gap-3 p-4 rounded-2xl border border-[var(--a-line)] bg-[var(--a-soft)] hover:brightness-105 transition">
+              <span className="w-9 h-9 rounded-xl grid place-items-center bg-[var(--a)] text-white flex-shrink-0">{deleting ? <Spinner size={15} /> : <IconRefreshCw size={16} />}</span>
+              <span>
+                <span className="block font-semibold text-sm text-[var(--a)]">Devolver al stock</span>
+                <span className="block text-xs text-[var(--ink-muted)] leading-relaxed mt-0.5">Las credenciales vuelven a estar a la venta. El pedido se elimina.</span>
+              </span>
             </button>
-
-            {/* Opción 2: eliminar permanente */}
-            <button
-              onClick={() => deletePermanent(deleteModal)}
-              disabled={deleting}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px', borderRadius: 12, background: 'var(--status-red-bg)', border: '1px solid var(--status-red-border)', cursor: 'pointer', textAlign: 'left', fontFamily: 'DM Sans, sans-serif', width: '100%' }}>
-              <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--status-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {deleting ? <Spinner size={15} /> : <IconTrash size={15} style={{ color: '#fff' }} />}
-              </div>
-              <div>
-                <p style={{ fontWeight: 700, fontSize: 13, color: 'var(--status-red)', marginBottom: 3 }}>Eliminar permanentemente</p>
-                <p style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5 }}>
-                  Borra el pedido y las credenciales de la base de datos. No se puede recuperar.
-                </p>
-              </div>
+            <button onClick={() => deletePermanent(deleteModal)} disabled={deleting} className="w-full text-left flex items-start gap-3 p-4 rounded-2xl border border-[var(--status-red-border)] bg-[var(--status-red-bg)] hover:brightness-105 transition">
+              <span className="w-9 h-9 rounded-xl grid place-items-center bg-[var(--status-red)] text-white flex-shrink-0">{deleting ? <Spinner size={15} /> : <IconTrash size={15} />}</span>
+              <span>
+                <span className="block font-semibold text-sm text-[var(--status-red)]">Eliminar para siempre</span>
+                <span className="block text-xs text-[var(--ink-muted)] leading-relaxed mt-0.5">Borra el pedido y sus credenciales. No se puede recuperar.</span>
+              </span>
             </button>
-
-            <button onClick={() => setDeleteModal(null)} className="btn-secondary" style={{ justifyContent: 'center' }}>
-              Cancelar
-            </button>
+            <button onClick={() => setDeleteModal(null)} className="btn-ghost w-full justify-center">Cancelar</button>
           </div>
         )}
       </Modal>

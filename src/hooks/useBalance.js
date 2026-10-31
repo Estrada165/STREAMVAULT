@@ -12,7 +12,8 @@ export function useBalance() {
     fetchBalance()
 
     const channel = supabase
-      .channel('balance-' + profile.id)
+      // Nombre único: este hook se usa en varios lugares a la vez (menú y Tienda)
+      .channel(`balance-${profile.id}-${Math.random().toString(36).slice(2, 8)}`)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'balances',
         filter: `user_id=eq.${profile.id}`

@@ -1,22 +1,34 @@
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
-export const DEFAULT_TEMPLATE = `› Hola {nombre_cliente}
+export const DEFAULT_TEMPLATE = `👋 ¡Hola {nombre_cliente}!
 
-› Tu acceso a {plataforma} está listo
+🎬 Tu acceso a *{plataforma}* ya está listo 🚀
 
-• Correo: {correo}
-• Contraseña: {contrasena}
-• Perfil: {perfil}
-• PIN: {pin}
-• URL: {url}
-• Código: {codigo}
+📧 Correo: {correo}
+🔑 Contraseña: {contrasena}
+👤 Perfil: {perfil}
+🔢 PIN: {pin}
+🔗 URL: {url}
+🎟️ Código: {codigo}
 
-› Duración: {duracion} días
-› Vence: {fecha_vencimiento}
-› Pedido: {id_pedido}
+⏳ Duración: {duracion} días
+📅 Vence: {fecha_vencimiento}
 
-› Soporte: Escríbeme ante cualquier problema`
+Ante cualquier problema, escríbeme 🙌`
+
+/**
+ * Enlace para abrir WhatsApp con un mensaje.
+ * Usa api.whatsapp.com y NO wa.me: la redirección de wa.me rompe los emojis
+ * de 4 bytes (👋 📧 🔑 📅…) y llegan como "�".
+ */
+export function waLink(phone, text) {
+  const clean = String(phone || '').replace(/\D/g, '')
+  const params = []
+  if (clean) params.push(`phone=${clean}`)
+  if (text) params.push(`text=${encodeURIComponent(String(text).normalize('NFC'))}`)
+  return `https://api.whatsapp.com/send${params.length ? '?' + params.join('&') : ''}`
+}
 
 /**
  * Builds a WhatsApp URL with pre-filled message from a template.
@@ -26,11 +38,7 @@ export function buildWhatsAppUrl(phone, template, variables) {
   const tpl = (template && template.trim()) ? template : DEFAULT_TEMPLATE
   const message = fillTemplate(tpl, variables)
 
-  const cleanPhone = phone.startsWith('+')
-    ? '+' + phone.slice(1).replace(/\D/g, '')
-    : phone.replace(/\D/g, '')
-
-  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`
+  return waLink(phone, message)
 }
 
 /**
@@ -52,7 +60,9 @@ export function fillTemplate(template, variables) {
     '{fecha_vencimiento}': variables.expiresAt
       ? format(new Date(variables.expiresAt), "d 'de' MMMM yyyy", { locale: es })
       : '',
-    '{id_pedido}': variables.orderCode || '',
+    // El código de pedido es interno (para el distribuidor y soporte): nunca va al cliente final.
+    // Si una plantilla antigua lo incluye, su línea se elimina sola.
+    '{id_pedido}': '',
   }
 
   for (const [key, value] of Object.entries(replacements)) {
@@ -69,6 +79,8 @@ export function fillTemplate(template, variables) {
     })
     .join('\n')
 
+  // Si falta el nombre del cliente: "¡Hola !" → "¡Hola!"
+  result = result.replace(/[ \t]+([!?.,])/g, '$1')
   result = result.replace(/\n{3,}/g, '\n\n').trim()
 
   return result

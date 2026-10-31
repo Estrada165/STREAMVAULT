@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
+import { APP_FULL_NAME } from '@/lib/brand'
 import { supabase } from '@/lib/supabase'
-import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs } from '@/components/ui'
-import { IconUsers, IconSearch, IconEdit, IconTrash, IconWhatsApp } from '@/assets/icons'
+import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs, SkeletonList, Toggle, useToast } from '@/components/ui'
+import { IconUsers, IconSearch, IconEdit, IconTrash, IconWhatsApp, IconCalendar, IconPower, IconCheck } from '@/assets/icons'
 import { daysRemaining, getDaysColor, formatDate } from '@/utils'
+import { waLink } from '@/lib/whatsapp'
+import { PAY_METHODS, parseAmount, currencyOf, extendProviderAccess, registerPayment, nextExpiry } from '@/lib/admin'
 
 export default function AdminProveedores() {
   const [providers, setProviders] = useState([])
@@ -16,6 +19,8 @@ export default function AdminProveedores() {
   const [error, setError] = useState('')
   const [editPhone, setEditPhone] = useState('')
   const [editCost, setEditCost] = useState('')
+  const [pay, setPay] = useState({ on: true, amount: '', currency: 'PEN', method: 'Yape', note: '' })
+  const toast = useToast()
 
   useEffect(() => { fetchProviders() }, [])
 
@@ -43,26 +48,27 @@ export default function AdminProveedores() {
       await supabase.from('users').update({ is_active: true }).eq('provider_id', provider.id).eq('role', 'distribuidor')
     }
     fetchProviders()
+    toast(newActive ? 'Proveedor y sus distribuidores activados' : 'Proveedor y sus distribuidores desactivados')
   }
 
   async function extendAccess() {
-    if (!extendDays || extendDays === 0) return setError('Ingresa un número de días distinto de 0')
+    if (!extendDays || parseInt(extendDays) === 0) return setError('Ingresa un número de días distinto de 0')
+    const days = parseInt(extendDays)
+    const charge = days > 0 && pay.on && parseFloat(pay.amount) > 0
     setSaving(true); setError('')
     try {
-      const current = modal.data.expires_at ? new Date(modal.data.expires_at) : new Date()
-      const base = current > new Date() ? current : new Date()
-      base.setDate(base.getDate() + parseInt(extendDays))
-      const finalDate = base < new Date() ? new Date() : base
-      await supabase.from('providers').update({
-        expires_at: finalDate.toISOString(),
-        is_active: parseInt(extendDays) > 0 ? true : modal.data.is_active
-      }).eq('id', modal.data.id)
-      await supabase.from('users').update({
-        is_active: parseInt(extendDays) > 0 ? true : modal.data.is_active
-      }).eq('id', modal.data.user_id)
+      await extendProviderAccess(modal.data, days)
+      if (charge) await registerPayment({ providerId: modal.data.id, amount: pay.amount, currency: pay.currency, days, method: pay.method, note: pay.note })
       setModal(null); fetchProviders()
+      toast.success(charge ? 'Acceso actualizado y cobro registrado' : 'Acceso actualizado')
     } catch (e) { setError(e.message) }
     setSaving(false)
+  }
+
+  function openExtend(provider) {
+    setExtendDays(30); setError('')
+    setPay({ on: true, amount: parseAmount(provider.renewal_cost), currency: currencyOf(provider.renewal_cost), method: 'Yape', note: '' })
+    setModal({ type: 'extend', data: provider })
   }
 
   function openEdit(provider) {
@@ -84,13 +90,13 @@ export default function AdminProveedores() {
 
   function sendRenewalMessage(provider) {
     const phone = (provider.users?.phone || '').replace(/\D/g, '')
-    if (!phone) return alert('Este proveedor no tiene número de teléfono configurado.')
+    if (!phone) return toast.error('Este proveedor no tiene número de teléfono configurado.')
     const name = provider.display_name || provider.users?.full_name || 'Proveedor'
     const days = provider.expires_at ? daysRemaining(provider.expires_at) : null
     const daysText = days !== null && days <= 0 ? 'ya ha vencido' : days !== null ? `vence en ${days} día${days === 1 ? '' : 's'}` : 'está próximo a vencer'
     const costText = provider.renewal_cost ? `El costo de renovación es *${provider.renewal_cost}*.` : ''
-    const msg = `Hola ${name}! 👋\n\nTu acceso a *StreamVault* ${daysText}.\n${costText}\n\nPara continuar disfrutando del servicio, por favor coordina tu renovación. ¡Gracias!`
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+    const msg = `Hola ${name}! 👋\n\nTu acceso a *${APP_FULL_NAME}* ${daysText}.\n${costText}\n\nPara continuar disfrutando del servicio, por favor coordina tu renovación. ¡Gracias!`
+    window.open(waLink(phone, msg), '_blank')
   }
 
   function openDelete(provider) {
@@ -141,30 +147,15 @@ export default function AdminProveedores() {
     inactivo: providers.filter(p => !p.is_active && p.expires_at).length,
   }
 
-  const Btn = ({ onClick, title, children, variant = 'ghost', color }) => {
-    const base = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, width: 32, height: 32, borderRadius: 8, cursor: 'pointer', border: 'none', fontFamily: 'DM Sans, sans-serif', fontSize: 12, transition: 'opacity 0.15s', flexShrink: 0 }
-    const styles = {
-      ghost: { ...base, background: 'var(--surface-overlay)', color: color || 'var(--ink-faint)', border: '1px solid var(--surface-border)' },
-      green: { ...base, background: '#25d366', color: '#fff' },
-      red:   { ...base, background: 'var(--status-red-bg)', color: 'var(--status-red)', border: '1px solid var(--status-red-border)' },
-    }
-    return <button onClick={onClick} title={title} style={styles[variant]}>{children}</button>
-  }
-
   return (
     <div>
       <PageHeader
         title="Proveedores"
-        subtitle="Gestiona el acceso de proveedores a la plataforma"
-        action={
-          <button className="btn-secondary" onClick={() => setModal({ type: 'info' })}>
-            <IconUsers size={15} />¿Cómo agregar?
-          </button>
-        }
+        subtitle="Activa cuentas, ajusta días de acceso y avisa renovaciones"
+        action={<button className="btn-secondary" onClick={() => setModal({ type: 'info' })}><IconUsers size={15} />¿Cómo agregar?</button>}
       />
 
-      {/* ── Tabs de filtro ── */}
-      <div style={{ marginBottom: 14 }}>
+      <div className="flex flex-col lg:flex-row gap-3 mb-5">
         <Tabs
           tabs={[
             { label: 'Todos', value: 'all', count: counts.all },
@@ -175,223 +166,201 @@ export default function AdminProveedores() {
           active={filterTab}
           onChange={v => { setFilterTab(v); setSearch('') }}
         />
+        <label className="relative flex-1">
+          <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)] pointer-events-none" />
+          <input className="input input-icon" placeholder="Buscar por nombre, correo o código" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar proveedor" />
+        </label>
       </div>
 
-      <div style={{ position: 'relative', marginBottom: 16 }}>
-        <IconSearch size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-faint)', pointerEvents: 'none' }} />
-        <input className="input" style={{ paddingLeft: 36 }} placeholder="Buscar por nombre, email o código..."
-          value={search} onChange={e => setSearch(e.target.value)} />
-      </div>
-
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={28} /></div>
-      ) : filtered.length === 0 ? (
-        <div className="card"><EmptyState icon={IconUsers} title="Sin proveedores" description={filterTab === 'pendiente' ? 'No hay proveedores pendientes de activación.' : filterTab === 'inactivo' ? 'No hay proveedores desactivados.' : 'Los proveedores aparecen aquí cuando se registran en la app.'} /></div>
+      {loading ? <SkeletonList rows={5} /> : filtered.length === 0 ? (
+        <div className="card"><EmptyState icon={IconUsers} title="Sin proveedores" description={filterTab === 'pendiente' ? 'No hay proveedores pendientes de activación.' : filterTab === 'inactivo' ? 'No hay proveedores desactivados.' : 'Aparecen aquí cuando se registran en la app.'} /></div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="grid gap-3 stagger">
           {filtered.map(p => {
             const days = p.expires_at ? daysRemaining(p.expires_at) : null
             const dColor = days !== null ? getDaysColor(days) : null
             const isExpiringSoon = days !== null && days <= 7
             const hasPhone = !!p.users?.phone
-
+            const name = p.display_name || p.users?.full_name || '—'
             return (
-              <div key={p.id} style={{
-                background: 'var(--surface-raised)',
-                border: `1px solid ${isExpiringSoon && p.is_active ? 'var(--status-yellow-border)' : 'var(--surface-border)'}`,
-                borderLeft: `3px solid ${p.is_active ? 'var(--status-green)' : 'var(--ink-faint)'}`,
-                borderRadius: '0 12px 12px 0',
-                padding: '12px 16px',
-                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-              }}>
-                <div style={{ flex: '1 1 180px', minWidth: 0 }}>
-                  <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 2 }}>
-                    {p.display_name || p.users?.full_name || '—'}
-                  </p>
-                  <p style={{ fontSize: 11, color: 'var(--ink-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
-                    {p.users?.email}
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-                    <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'var(--surface-overlay)', padding: '2px 7px', borderRadius: 6, color: 'var(--ink-muted)', border: '1px solid var(--surface-border)' }}>
-                      {p.slug}
-                    </span>
-                    <Badge color={p.is_active ? 'green' : 'red'} dot>{p.is_active ? 'Activo' : !p.expires_at ? 'Pendiente' : 'Inactivo'}</Badge>
+              <article key={p.id} className={`card p-4 sm:p-5 ${isExpiringSoon && p.is_active ? '!border-[var(--status-yellow-border)]' : ''} ${!p.is_active ? 'opacity-90' : ''}`}>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
+                  <div className="flex items-center gap-3 flex-1 min-w-[220px]">
+                    <span className="w-11 h-11 rounded-xl bg-[var(--accent)] text-[var(--accent-ink)] grid place-items-center font-display font-bold flex-shrink-0 shadow-[inset_0_1px_0_var(--hl),0_3px_0_var(--a-edge)]">{name[0]}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-[15px] text-[var(--ink)] truncate">{name}</p>
+                        <Badge color={p.is_active ? 'green' : !p.expires_at ? 'violet' : 'red'} dot>{p.is_active ? 'Activo' : !p.expires_at ? 'Pendiente' : 'Inactivo'}</Badge>
+                      </div>
+                      <p className="text-xs text-[var(--ink-faint)] truncate">{p.users?.email} · <span className="font-mono">{p.slug}</span></p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-5 text-[13px]">
+                    <div>
+                      <p className="eyebrow !text-[10px] mb-1">Teléfono</p>
+                      {hasPhone ? <a href={waLink(p.users.phone.replace(/\D/g, ''))} target="_blank" rel="noreferrer" className="text-[var(--a)] font-medium hover:underline whitespace-nowrap">{p.users.phone}</a> : <span className="text-[var(--ink-faint)]">—</span>}
+                    </div>
+                    <div>
+                      <p className="eyebrow !text-[10px] mb-1">Costo</p>
+                      <span className="font-mono text-[var(--ink)]">{p.renewal_cost || '—'}</span>
+                    </div>
+                    <div>
+                      <p className="eyebrow !text-[10px] mb-1">Vence</p>
+                      {days !== null
+                        ? <span className={`days-pill ${dColor}`} title={formatDate(p.expires_at)}>{days <= 0 ? 'Vencido' : `${days} d`}</span>
+                        : <span className="text-[var(--ink-faint)]">—</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button onClick={() => openExtend(p)} className="btn-primary btn-sm flex-1 sm:flex-none"><IconCalendar size={14} />Días</button>
+                    {hasPhone && <button onClick={() => sendRenewalMessage(p)} className={`btn-sm btn-icon ${isExpiringSoon ? 'btn-accent' : 'btn-secondary'}`} title="Enviar aviso de renovación" aria-label="Enviar aviso de renovación"><IconWhatsApp size={14} /></button>}
+                    <button onClick={() => openEdit(p)} className="btn-secondary btn-sm btn-icon" title="Editar teléfono y costo" aria-label="Editar teléfono y costo"><IconEdit size={14} /></button>
+                    <button onClick={() => toggleActive(p)} className={`btn-secondary btn-sm btn-icon ${p.is_active ? 'hover:!text-[var(--status-red)]' : '!text-[var(--a)]'}`} title={p.is_active ? 'Desactivar' : 'Activar'} aria-label={p.is_active ? 'Desactivar' : 'Activar'}>
+                      {p.is_active ? <IconPower size={14} /> : <IconCheck size={14} />}
+                    </button>
+                    <button onClick={() => openDelete(p)} className="btn-ghost btn-sm !px-2 hover:!text-[var(--status-red)]" title="Eliminar proveedor" aria-label="Eliminar proveedor"><IconTrash size={14} /></button>
                   </div>
                 </div>
-
-                <div style={{ flex: '0 0 130px', minWidth: 100 }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 3 }}>Teléfono</p>
-                  {hasPhone
-                    ? <a href={`https://wa.me/${p.users.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer"
-                        style={{ fontSize: 12, color: 'var(--status-green)', textDecoration: 'none', fontWeight: 500 }}>
-                        {p.users.phone}
-                      </a>
-                    : <span style={{ fontSize: 12, color: 'var(--ink-faint)' }}>Sin teléfono</span>
-                  }
-                </div>
-
-                <div style={{ flex: '0 0 90px', minWidth: 70 }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 3 }}>Costo</p>
-                  {p.renewal_cost
-                    ? <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', fontFamily: 'Syne, sans-serif' }}>{p.renewal_cost}</span>
-                    : <span style={{ fontSize: 12, color: 'var(--ink-faint)' }}>—</span>
-                  }
-                </div>
-
-                <div style={{ flex: '0 0 90px', minWidth: 70 }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 3 }}>Vence</p>
-                  {days !== null
-                    ? <>
-                        <span className={`days-pill ${dColor}`} style={{ fontSize: 11 }}>
-                          {days <= 0 ? 'Vencido' : `${days}d`}
-                        </span>
-                        <p style={{ fontSize: 10, color: 'var(--ink-faint)', marginTop: 3 }}>{formatDate(p.expires_at)}</p>
-                      </>
-                    : <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>—</span>
-                  }
-                </div>
-
-                <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
-                  <Btn onClick={() => { setModal({ type: 'extend', data: p }); setExtendDays(30); setError('') }} title="Ajustar días">
-                    <IconEdit size={13} />
-                  </Btn>
-                  <Btn onClick={() => openEdit(p)} title="Editar teléfono y costo">
-                    <IconUsers size={13} />
-                  </Btn>
-                  {hasPhone && (
-                    <Btn onClick={() => sendRenewalMessage(p)} title="Enviar aviso de renovación"
-                      variant={isExpiringSoon ? 'green' : 'ghost'}
-                      color={!isExpiringSoon ? '#25d366' : undefined}>
-                      <IconWhatsApp size={13} />
-                    </Btn>
-                  )}
-                  <Btn onClick={() => toggleActive(p)} title={p.is_active ? 'Desactivar' : 'Activar'}
-                    color={p.is_active ? 'var(--status-red)' : 'var(--status-green)'}>
-                    {p.is_active
-                      ? <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-                      : <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    }
-                  </Btn>
-                  <Btn onClick={() => openDelete(p)} title="Eliminar proveedor" variant="red">
-                    <IconTrash size={13} />
-                  </Btn>
-                </div>
-              </div>
+              </article>
             )
           })}
         </div>
       )}
 
-      {/* ── Modal editar ── */}
-      <Modal open={modal?.type === 'edit'} onClose={() => setModal(null)} title="Editar información del proveedor">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: 12, fontSize: 13, color: 'var(--ink-muted)' }}>
-            <strong style={{ color: 'var(--ink)' }}>{modal?.data?.display_name || modal?.data?.users?.full_name || modal?.data?.users?.email}</strong>
-          </div>
+      {/* ── Editar ── */}
+      <Modal
+        open={modal?.type === 'edit'}
+        onClose={() => setModal(null)}
+        title="Datos del proveedor"
+        subtitle={modal?.data?.display_name || modal?.data?.users?.full_name || modal?.data?.users?.email}
+        footer={<>
+          <button onClick={() => setModal(null)} className="btn-ghost">Cancelar</button>
+          <button onClick={saveEdit} disabled={saving} className="btn-primary min-w-[110px]">{saving ? <Spinner size={15} /> : 'Guardar'}</button>
+        </>}
+      >
+        <div className="space-y-4">
           <div>
-            <label className="label">Número de WhatsApp / Teléfono</label>
+            <label className="label">WhatsApp / teléfono</label>
             <input className="input" placeholder="+51 999 999 999" value={editPhone} onChange={e => setEditPhone(e.target.value)} />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Se guardará en la base de datos.</p>
           </div>
           <div>
             <label className="label">Costo de renovación</label>
-            <input className="input" placeholder="Ej: S/ 30, $8, S/ 50/mes" value={editCost} onChange={e => setEditCost(e.target.value)} />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Se incluirá en el mensaje de WhatsApp de renovación.</p>
+            <input className="input" placeholder="S/ 50 al mes" value={editCost} onChange={e => setEditCost(e.target.value)} />
+            <p className="text-[11px] text-[var(--ink-faint)] mt-1.5">Aparece en el mensaje de renovación y en el menú del proveedor.</p>
           </div>
           {(editPhone || editCost) && (
-            <div style={{ background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', borderRadius: 10, padding: '10px 12px' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)', marginBottom: 6 }}>Preview del mensaje</p>
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {`Hola ${modal?.data?.display_name || modal?.data?.users?.full_name || 'Proveedor'}! 👋\n\nTu acceso a *StreamVault* vence en X días.\n${editCost ? `El costo de renovación es *${editCost}*.` : ''}\n\nPara continuar disfrutando del servicio, por favor coordina tu renovación. ¡Gracias!`}
-              </p>
+            <div>
+              <p className="label">Vista previa del mensaje</p>
+              <div className="rounded-2xl p-3.5 border border-[var(--surface-border)]" style={{ background: 'color-mix(in srgb, var(--a) 6%, var(--surface-overlay))' }}>
+                <p className="ml-auto max-w-[95%] rounded-2xl rounded-tr-md px-3.5 py-2.5 bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[13px] text-[var(--ink)] leading-relaxed whitespace-pre-wrap">
+                  {`Hola ${modal?.data?.display_name || modal?.data?.users?.full_name || 'Proveedor'}! 👋\n\nTu acceso a *${APP_FULL_NAME}* vence en X días.\n${editCost ? `El costo de renovación es *${editCost}*.` : ''}\n\nPara continuar disfrutando del servicio, por favor coordina tu renovación. ¡Gracias!`}
+                </p>
+              </div>
             </div>
           )}
           {error && <Alert type="error">{error}</Alert>}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-            <button onClick={saveEdit} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-              {saving ? <Spinner size={15} /> : 'Guardar'}
-            </button>
-          </div>
         </div>
       </Modal>
 
-      {/* ── Modal ajustar días ── */}
-      <Modal open={modal?.type === 'extend'} onClose={() => setModal(null)} title="Ajustar días de acceso">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: 12, fontSize: 13, color: 'var(--ink-muted)' }}>
-            <strong style={{ color: 'var(--ink)' }}>{modal?.data?.display_name || modal?.data?.users?.full_name || modal?.data?.users?.email}</strong>
-            <br /><span style={{ fontSize: 12 }}>Vence actualmente: {formatDate(modal?.data?.expires_at) || 'Sin fecha'}</span>
+      {/* ── Ajustar días ── */}
+      <Modal
+        open={modal?.type === 'extend'}
+        onClose={() => setModal(null)}
+        title="Días de acceso"
+        subtitle={`${modal?.data?.display_name || modal?.data?.users?.email || ''} · vence ${modal?.data?.expires_at ? formatDate(modal.data.expires_at) : 'sin fecha'}`}
+        footer={<>
+          <button onClick={() => setModal(null)} className="btn-ghost">Cancelar</button>
+          <button onClick={extendAccess} disabled={saving} className={parseInt(extendDays) < 0 ? 'btn-danger min-w-[120px]' : 'btn-primary min-w-[120px]'}>
+            {saving ? <Spinner size={15} /> : parseInt(extendDays) >= 0 ? `+${extendDays} días` : `${extendDays} días`}
+          </button>
+        </>}
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-4 gap-1.5">
+            {[7, 15, 30, 60, 90, -7, -15, -30].map(d => (
+              <button key={d} onClick={() => setExtendDays(d)} className={`btn-secondary btn-sm !px-0 ${extendDays === d ? 'is-down' : ''} ${d < 0 ? '!text-[var(--status-red)]' : extendDays === d ? '!text-[var(--a)]' : ''}`}>
+                {d > 0 ? `+${d}` : d}
+              </button>
+            ))}
           </div>
           <div>
-            <label className="label">Días a sumar o restar</label>
-            <input type="number" className="input" value={extendDays} onChange={e => setExtendDays(e.target.value)} placeholder="Ej: 30 para sumar, -15 para restar" />
-            <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>Usa números negativos para restar días</p>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-              {[-30, -15, -7, 7, 15, 30, 60, 90].map(d => (
-                <button key={d} onClick={() => setExtendDays(d)}
-                  style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, background: extendDays === d ? 'var(--ink)' : 'var(--surface-overlay)', color: extendDays === d ? 'var(--surface)' : d < 0 ? 'var(--status-red)' : 'var(--ink-muted)', border: `1px solid ${extendDays === d ? 'var(--ink)' : 'var(--surface-border)'}` }}>
-                  {d > 0 ? `+${d}d` : `${d}d`}
-                </button>
-              ))}
+            <label className="label">O escribe los días (negativo para restar)</label>
+            <input type="number" className="input font-mono" value={extendDays} onChange={e => setExtendDays(e.target.value)} placeholder="30" />
+          </div>
+          {extendDays !== '' && parseInt(extendDays) !== 0 && (
+            <div className="rounded-xl px-3.5 py-2.5 text-[13px] bg-[var(--a-soft)] border border-[var(--a-line)] flex justify-between">
+              <span className="text-[var(--ink-muted)]">Nueva fecha</span>
+              <span className="font-semibold text-[var(--a)]">{(() => {
+                const d = nextExpiry(modal?.data?.expires_at, extendDays)
+                return d > new Date(Date.now() + 6e4) ? d.toLocaleDateString('es-PE') : 'Hoy (mínimo)'
+              })()}</span>
             </div>
-            {modal?.data?.expires_at && extendDays !== '' && extendDays !== 0 && (
-              <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 8 }}>
-                Nueva fecha: <strong style={{ color: 'var(--ink)' }}>
-                  {(() => {
-                    const base = new Date(modal.data.expires_at) > new Date() ? new Date(modal.data.expires_at) : new Date()
-                    base.setDate(base.getDate() + parseInt(extendDays))
-                    return base > new Date() ? base.toLocaleDateString('es-PE') : 'Hoy (mínimo)'
-                  })()}
-                </strong>
-              </p>
-            )}
-          </div>
+          )}
+          {parseInt(extendDays) > 0 && !modal?.data?.is_active && <p className="text-xs text-[var(--ink-muted)]">Al sumar días la cuenta queda activa.</p>}
+          {parseInt(extendDays) > 0 && (
+            <div className="rounded-2xl border border-[var(--surface-border)] p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--ink)]">Registrar cobro</p>
+                  <p className="text-[11.5px] text-[var(--ink-faint)]">Queda en Cobros para tu control de ingresos</p>
+                </div>
+                <Toggle checked={pay.on} onChange={v => setPay(p => ({ ...p, on: v }))} />
+              </div>
+              {pay.on && (
+                <div className="space-y-3 animate-fade-in">
+                  <div className="flex gap-2">
+                    <div className="inset flex p-1 gap-1 flex-shrink-0">
+                      {['PEN', 'USD'].map(c => (
+                        <button key={c} type="button" onClick={() => setPay(p => ({ ...p, currency: c }))} className={`px-2.5 h-8 rounded-[.55rem] text-xs font-semibold border ${pay.currency === c ? 'bg-[var(--key)] text-[var(--ink)] border-[var(--surface-border-strong)]' : 'border-transparent text-[var(--ink-faint)]'}`}>{c === 'PEN' ? 'S/' : '$'}</button>
+                      ))}
+                    </div>
+                    <input type="number" inputMode="decimal" min="0" step="0.5" className="input font-mono" placeholder="Monto" value={pay.amount} onChange={e => setPay(p => ({ ...p, amount: e.target.value }))} aria-label="Monto cobrado" />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PAY_METHODS.map(m => <button key={m} type="button" onClick={() => setPay(p => ({ ...p, method: m }))} className={`btn-secondary btn-sm ${pay.method === m ? 'is-down !text-[var(--a)]' : ''}`}>{m}</button>)}
+                  </div>
+                  <input className="input" maxLength={200} placeholder="Nota (opcional): n.º de operación, etc." value={pay.note} onChange={e => setPay(p => ({ ...p, note: e.target.value }))} />
+                </div>
+              )}
+            </div>
+          )}
           {error && <Alert type="error">{error}</Alert>}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-            <button onClick={extendAccess} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-              {saving ? <Spinner size={15} /> : parseInt(extendDays) >= 0 ? `+${extendDays} días` : `${extendDays} días`}
-            </button>
-          </div>
         </div>
       </Modal>
 
-      {/* ── Modal info ── */}
-      <Modal open={modal?.type === 'info'} onClose={() => setModal(null)} title="Agregar proveedor">
-        <Alert type="info">
-          El proveedor debe registrarse en <strong>/register</strong> con rol "Proveedor". Luego aparece aquí para que actives su acceso y le des días.
-        </Alert>
-        <button onClick={() => setModal(null)} className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 14 }}>Entendido</button>
+      {/* ── Info ── */}
+      <Modal open={modal?.type === 'info'} onClose={() => setModal(null)} title="Agregar un proveedor" maxWidth="max-w-sm">
+        <ol className="space-y-3 text-sm text-[var(--ink-muted)]">
+          {['Se registra en /register eligiendo "Proveedor".', 'Aparece aquí en "Pendientes".', 'Le das días de acceso y queda activo.'].map((t, i) => (
+            <li key={i} className="flex gap-3"><span className="w-6 h-6 rounded-lg inset grid place-items-center font-mono text-xs text-[var(--ink)] flex-shrink-0">{i + 1}</span>{t}</li>
+          ))}
+        </ol>
+        <button onClick={() => setModal(null)} className="btn-primary w-full mt-6">Entendido</button>
       </Modal>
 
-      {/* ── Modal eliminar ── */}
-      <Modal open={modal?.type === 'delete'} onClose={() => setModal(null)} title="Eliminar proveedor">
+      {/* ── Eliminar ── */}
+      <Modal open={modal?.type === 'delete'} onClose={() => setModal(null)} title="Eliminar proveedor" subtitle={modal?.data?.display_name || modal?.data?.users?.email}>
         {modal?.data && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ background: 'var(--status-red-bg)', border: '1px solid var(--status-red-border)', borderRadius: 10, padding: '12px 14px', fontSize: 13 }}>
-              <p style={{ fontWeight: 700, color: 'var(--status-red)', marginBottom: 8 }}>⚠ Esta acción es irreversible</p>
-              <p style={{ color: 'var(--status-red)', marginBottom: 8 }}>Al eliminar a <strong>{modal.data.display_name || modal.data.users?.email}</strong> se borrará permanentemente:</p>
-              <ul style={{ color: 'var(--status-red)', fontSize: 12, paddingLeft: 16, lineHeight: 2 }}>
-                <li>Su cuenta y acceso a la plataforma</li>
+          <div className="space-y-4">
+            <div className="rounded-xl p-4 bg-[var(--status-red-bg)] border border-[var(--status-red-border)] text-[13px] text-[var(--status-red)]">
+              <p className="font-semibold mb-2">Esto no se puede deshacer. Se borrará:</p>
+              <ul className="list-disc pl-4 space-y-1 leading-relaxed">
+                <li>Su acceso a la plataforma</li>
                 <li>Todos sus productos y stock</li>
-                <li>Todos los pedidos vinculados a sus productos</li>
-                <li>Todos sus tickets de soporte</li>
-                <li>Sus distribuidores no serán eliminados, pero perderán acceso a sus productos</li>
+                <li>Los pedidos de sus productos y sus tickets</li>
+                <li>Sus distribuidores quedan sin proveedor (no se eliminan)</li>
               </ul>
-              <p style={{ color: 'var(--status-red)', fontWeight: 600, marginTop: 8 }}>No hay forma de recuperar esta información.</p>
             </div>
             <div>
-              <label className="label">Escribe <span style={{ color: 'var(--status-red)', fontWeight: 700 }}>ELIMINAR</span> para confirmar</label>
-              <input className="input" placeholder="ELIMINAR" value={deleteConfirmText} onChange={e => setDeleteConfirmText(e.target.value)} autoComplete="off" />
+              <label className="label">Escribe <span className="text-[var(--status-red)] font-bold">ELIMINAR</span> para confirmar</label>
+              <input className="input font-mono" placeholder="ELIMINAR" value={deleteConfirmText} onChange={e => setDeleteConfirmText(e.target.value)} autoComplete="off" />
             </div>
             {error && <Alert type="error">{error}</Alert>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-              <button onClick={confirmDeleteProvider} disabled={saving || deleteConfirmText !== 'ELIMINAR'} className="btn-danger"
-                style={{ flex: 1, justifyContent: 'center', opacity: deleteConfirmText !== 'ELIMINAR' ? 0.4 : 1 }}>
-                {saving ? <Spinner size={15} /> : 'Eliminar todo'}
-              </button>
+            <div className="flex gap-2.5">
+              <button onClick={() => setModal(null)} className="btn-ghost flex-1 justify-center">Cancelar</button>
+              <button onClick={confirmDeleteProvider} disabled={saving || deleteConfirmText !== 'ELIMINAR'} className="btn-danger flex-1">{saving ? <Spinner size={15} /> : 'Eliminar todo'}</button>
             </div>
           </div>
         )}

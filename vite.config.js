@@ -8,4 +8,16 @@ export default defineConfig({
       '@': '/src',
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Librerías en archivos aparte: cambian poco y el navegador las guarda en caché
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          supabase: ['@supabase/supabase-js'],
+          dates: ['date-fns'],
+        },
+      },
+    },
+  },
 })

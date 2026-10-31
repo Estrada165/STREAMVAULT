@@ -1,9 +1,12 @@
+import { useLocation } from 'react-router-dom'
+import { rpcError } from '@/lib/rpcError'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs } from '@/components/ui'
-import { IconHeadphones, IconEdit, IconX, IconCheck, IconAlertCircle, IconRefreshCw, IconDollar, IconTrash, IconWhatsApp } from '@/assets/icons'
+import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs, SkeletonList } from '@/components/ui'
+import { IconHeadphones, IconEdit, IconX, IconCheck, IconAlertCircle, IconRefreshCw, IconDollar, IconTrash, IconWhatsApp, IconMail, IconKey, IconUser, IconLink } from '@/assets/icons'
 import { formatDateTime, getReasonLabel } from '@/utils'
+import { waLink } from '@/lib/whatsapp'
 
 function calcRefund(pricePaid, createdAt, expiresAt) {
   const now = new Date()
@@ -17,19 +20,12 @@ function calcRefund(pricePaid, createdAt, expiresAt) {
 }
 
 // ── Botón WhatsApp reutilizable ──────────────────────────────
-function WaBtn({ phone, message, label = 'WhatsApp', size = 13 }) {
+function WaBtn({ phone, message, label = 'WhatsApp', className = '' }) {
   if (!phone) return null
   const clean = phone.replace(/\D/g, '')
-  const url = `https://wa.me/${clean}?text=${encodeURIComponent(message)}`
   return (
-    <a href={url} target="_blank" rel="noreferrer"
-      style={{
-        fontSize: size, padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 5,
-        borderRadius: 8, background: '#25d366', color: '#fff', fontWeight: 600,
-        fontFamily: 'DM Sans, sans-serif', textDecoration: 'none', whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}>
-      <IconWhatsApp size={13} />{label}
+    <a href={waLink(clean, message)} target="_blank" rel="noreferrer" className={`btn-accent btn-sm ${className}`}>
+      <IconWhatsApp size={14} />{label}
     </a>
   )
 }
@@ -38,7 +34,8 @@ export default function ProveedorSoporte() {
   const { provider } = useAuth()
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('abierto')
+  const location = useLocation()
+  const [tab, setTab] = useState(location.state?.tab || 'abierto')
   const [deletingId, setDeletingId] = useState(null)
 
   const [modal, setModal] = useState(null)
@@ -67,7 +64,6 @@ export default function ProveedorSoporte() {
   useEffect(() => { if (provider) fetchTickets() }, [provider, tab])
 
   async function fetchTickets() {
-    setLoading(true)
     let q = supabase
       .from('support_tickets')
       .select(`*, orders(id, order_code, client_name, price_paid, created_at, expires_at, product_id, stock_item_id, distributor_id, products(name, duration_days, platforms(name, logo_filename))), users(full_name, email, phone)`)
@@ -150,16 +146,9 @@ export default function ProveedorSoporte() {
   async function saveRenewal() {
     setRenewSaving(true); setRenewError('')
     try {
-      const base = new Date(renewModal.orders.expires_at) < new Date() ? new Date() : new Date(renewModal.orders.expires_at)
-      base.setDate(base.getDate() + Number(renewDays))
-      const { error: orderErr } = await supabase.from('orders').update({ expires_at: base.toISOString(), status: 'activo' }).eq('id', renewModal.orders?.id)
-      if (orderErr) throw orderErr
-      await supabase.from('notifications').insert({
-        user_id: renewModal.orders?.distributor_id,
-        title: 'Pedido renovado',
-        message: `Tu pedido #${renewModal.orders?.order_code} de ${renewModal.orders?.products?.name} fue renovado por ${renewDays} días.`,
-        type: 'success', ref_id: renewModal.orders?.id,
-      })
+      // Renovación de cortesía (sin cobro): fecha + aviso en un solo paso
+      const { error: rpcErr } = await supabase.rpc('renew_order', { p_order: renewModal.orders?.id, p_days: Number(renewDays), p_charge: false })
+      if (rpcErr) throw new Error(rpcError(rpcErr))
       if (renewModal.status !== 'resuelto') {
         await supabase.from('support_tickets').update({ status: 'resuelto', updated_at: new Date().toISOString() }).eq('id', renewModal.id)
       }
@@ -172,56 +161,15 @@ export default function ProveedorSoporte() {
     setCancelSaving(true)
     setCancelError('')
     try {
-      const order = cancelModal.orders
-      const refund = calcRefund(order.price_paid, order.created_at, order.expires_at)
-
-      const { error: orderErr } = await supabase
-        .from('orders').update({ status: 'cancelado', updated_at: new Date().toISOString() }).eq('id', order.id)
-      if (orderErr) throw orderErr
-
-      if (order.stock_item_id) {
-        await supabase.from('stock_items')
-          .update({ is_sold: false, sold_at: null, order_id: null })
-          .eq('id', order.stock_item_id)
-      }
-
-      if (type === 'platform' && refund.refundAmount > 0) {
-        const { data: balRow } = await supabase
-          .from('balances').select('amount_usd').eq('user_id', order.distributor_id).maybeSingle()
-        const currentBal = parseFloat(balRow?.amount_usd || 0)
-        const newBal = Math.round((currentBal + refund.refundAmount) * 100) / 100
-        const { error: balErr } = await supabase
-          .from('balances').update({ amount_usd: newBal }).eq('user_id', order.distributor_id)
-        if (balErr) throw balErr
-        await supabase.from('transactions').insert({
-          user_id: order.distributor_id,
-          type: 'devolucion',
-          amount_usd: refund.refundAmount,
-          description: `Reembolso por anulación — Pedido #${order.order_code} (${refund.remainingDays}d restantes)`,
-          ref_order_id: order.id,
-        })
-      }
-
-      const msg = type === 'platform'
-        ? `Tu pedido #${order.order_code} fue cancelado. Se te reembolsaron $${refund.refundAmount} en tu saldo de la plataforma.`
-        : type === 'external'
-        ? `Tu pedido #${order.order_code} fue cancelado. El reembolso de $${refund.refundAmount} se realizará de forma externa.`
-        : cancelNote?.trim() || `Tu pedido #${order.order_code} fue cancelado sin reembolso.`
-
-      await supabase.from('support_tickets').update({
-        status: 'resuelto',
-        provider_response: msg,
-        updated_at: new Date().toISOString(),
-      }).eq('id', cancelModal.id)
-
-      await supabase.from('notifications').insert({
-        user_id: order.distributor_id,
-        title: 'Venta anulada',
-        message: msg,
-        type: type === 'platform' ? 'success' : 'warning',
-        ref_id: order.id,
+      // Anulación completa en un solo paso: estado, cuenta de vuelta al stock, reembolso,
+      // ticket resuelto y aviso. El reembolso lo calcula la base de datos.
+      const { error: rpcErr } = await supabase.rpc('cancel_order', {
+        p_order: cancelModal.orders.id,
+        p_mode: ['platform', 'external'].includes(type) ? type : 'none',
+        p_note: cancelNote?.trim() || null,
+        p_ticket: cancelModal.id,
       })
-
+      if (rpcErr) throw new Error(rpcError(rpcErr))
       setCancelDone(true)
       setTimeout(() => { setCancelModal(null); setCancelDone(false); fetchTickets() }, 2000)
     } catch (e) {
@@ -230,20 +178,20 @@ export default function ProveedorSoporte() {
     setCancelSaving(false)
   }
 
-  const statusColor = { abierto: 'red', en_revision: 'yellow', resuelto: 'green' }
+  const statusColor = { abierto: 'violet', en_revision: 'yellow', resuelto: 'green' }
   const statusLabel = { abierto: 'Abierto', en_revision: 'En revisión', resuelto: 'Resuelto' }
 
   const activeCredFields = modal?.stock_item
-    ? [{ key: 'email', label: 'Email' }, { key: 'password', label: 'Contraseña' }, { key: 'url', label: 'URL' }, { key: 'profile_name', label: 'Perfil' }, { key: 'profile_pin', label: 'PIN' }, { key: 'activation_code', label: 'Código' }].filter(f => modal.stock_item[f.key])
+    ? [{ key: 'email', label: 'Correo' }, { key: 'password', label: 'Contraseña' }, { key: 'url', label: 'URL' }, { key: 'profile_name', label: 'Perfil' }, { key: 'profile_pin', label: 'PIN' }, { key: 'activation_code', label: 'Código' }].filter(f => modal.stock_item[f.key])
     : []
 
   return (
     <div>
-      <PageHeader title="Soporte" subtitle="Tickets de tus distribuidores" />
-      <div style={{ marginBottom: 16 }}>
+      <PageHeader title="Soporte" subtitle="Tickets de tus distribuidores: responde, repón o renueva" />
+      <div className="mb-5">
         <Tabs
           tabs={[
-            { label: 'Abiertos', value: 'abierto', count: tickets.filter(t => t.status === 'abierto').length },
+            { label: 'Abiertos', value: 'abierto', count: tab === 'abierto' ? tickets.length : undefined },
             { label: 'En revisión', value: 'en_revision' },
             { label: 'Resueltos', value: 'resuelto' },
             { label: 'Todos', value: 'all' },
@@ -252,51 +200,52 @@ export default function ProveedorSoporte() {
         />
       </div>
 
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={28} /></div>
-      ) : tickets.length === 0 ? (
-        <div className="card"><EmptyState icon={IconHeadphones} title="Sin tickets" description="No hay tickets en esta categoría." /></div>
+      {loading ? <SkeletonList rows={4} /> : tickets.length === 0 ? (
+        <div className="card"><EmptyState icon={IconHeadphones} title={tab === 'abierto' ? 'Sin tickets abiertos' : 'Nada por aquí'} description={tab === 'abierto' ? 'Cuando un distribuidor reporte un problema aparecerá aquí.' : 'No hay tickets en esta categoría.'} /></div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className="stagger">
+        <div className="space-y-3 stagger">
           {tickets.map(t => {
             const distPhone = (t.users?.phone || '').replace(/\D/g, '')
-
             return (
-              <div key={t.id} className="card" style={{ padding: '14px 16px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 5, background: t.status === 'abierto' ? 'var(--status-red)' : t.status === 'en_revision' ? 'var(--status-yellow)' : 'var(--status-green)' }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                      <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--ink-faint)' }}>#{t.ticket_code}</span>
-                      <Badge color={statusColor[t.status] || 'neutral'}>{statusLabel[t.status] || t.status}</Badge>
+              <article key={t.id} className={`card overflow-hidden ${t.status === 'abierto' ? 'card-sig' : ''}`}>
+                <div className="p-4 sm:p-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                      <Badge color={statusColor[t.status] || 'neutral'} dot>{statusLabel[t.status] || t.status}</Badge>
+                      <span className="font-mono text-[11px] text-[var(--ink-faint)]">#{t.ticket_code}</span>
+                      <span className="text-[11px] text-[var(--ink-faint)]">· {formatDateTime(t.created_at)}</span>
                     </div>
-                    <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 3 }}>{getReasonLabel(t.reason)}</p>
-                    <p style={{ fontSize: 12, color: 'var(--ink-muted)' }}>Pedido <span style={{ fontFamily: 'DM Mono, monospace' }}>#{t.orders?.order_code}</span> · {t.orders?.products?.name}</p>
-                    <p style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 3 }}>De: {t.users?.full_name || t.users?.email} · {formatDateTime(t.created_at)}</p>
-                    {t.description && <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--ink-muted)' }}>{t.description}</div>}
-                    {t.provider_response && (
-                      <div style={{ marginTop: 8, background: 'var(--status-green-bg)', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: 'var(--status-green)', border: '1px solid var(--status-green-border)' }}>
-                        <strong>Tu respuesta:</strong> {t.provider_response}
-                      </div>
-                    )}
-                    {t.stock_item && (
-                      <div style={{ marginTop: 8, background: 'var(--surface-overlay)', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', lineHeight: 1.8 }}>
-                        {t.stock_item.email && <div>Email: {t.stock_item.email}</div>}
-                        {t.stock_item.password && <div>Pass: {t.stock_item.password}</div>}
-                        {t.stock_item.url && <div>URL: {t.stock_item.url}</div>}
-                        {t.stock_item.profile_name && <div>Perfil: {t.stock_item.profile_name}</div>}
-                      </div>
-                    )}
+                    <h3 className="font-display font-semibold text-base text-[var(--ink)]">{getReasonLabel(t.reason)}</h3>
+                    <p className="text-[13px] text-[var(--ink-muted)] mt-0.5">
+                      {t.users?.full_name || t.users?.email} · <span className="font-mono">#{t.orders?.order_code}</span> · {t.orders?.products?.name}
+                    </p>
+                    {t.description && <p className="text-[13.5px] text-[var(--ink)] mt-3 leading-relaxed">“{t.description}”</p>}
+
+                    <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                      {t.stock_item && (
+                        <div className="inset px-3 py-2.5 font-mono text-[12px] text-[var(--ink-muted)] leading-[1.8] min-w-0">
+                          {t.stock_item.email && <div className="truncate flex items-center gap-2"><IconMail size={12} className="flex-shrink-0" /><span className="text-[var(--ink)] truncate">{t.stock_item.email}</span></div>}
+                          {t.stock_item.password && <div className="truncate flex items-center gap-2"><IconKey size={12} className="flex-shrink-0" /><span className="text-[var(--ink)] truncate">{t.stock_item.password}</span></div>}
+                          {t.stock_item.profile_name && <div className="truncate flex items-center gap-2"><IconUser size={12} className="flex-shrink-0" />{t.stock_item.profile_name}{t.stock_item.profile_pin ? ` · ${t.stock_item.profile_pin}` : ''}</div>}
+                          {t.stock_item.url && <div className="truncate flex items-center gap-2"><IconLink size={12} className="flex-shrink-0" /><span className="truncate">{t.stock_item.url}</span></div>}
+                        </div>
+                      )}
+                      {t.provider_response && (
+                        <div className="rounded-xl px-3 py-2.5 text-[13px] bg-[var(--a-soft)] border border-[var(--a-line)]">
+                          <p className="eyebrow !text-[10px] mb-1">Tu respuesta</p>
+                          <p className="text-[var(--ink)] leading-relaxed">{t.provider_response}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                    <button onClick={() => openTicket(t)} className="btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>
-                      <IconEdit size={13} />Responder
-                    </button>
-                    {/* ── WA: notificar al distribuidor (en revisión o resuelto) ── */}
+
+                  <div className="flex lg:flex-col flex-wrap gap-2 lg:w-44">
+                    <button onClick={() => openTicket(t)} className="btn-primary btn-sm lg:w-full"><IconEdit size={14} />Responder</button>
                     {(t.status === 'en_revision' || t.status === 'resuelto') && distPhone && (
                       <WaBtn
                         phone={distPhone}
-                        label="Notificar"
+                        label="Avisar"
+                        className="lg:w-full"
                         message={
                           t.status === 'resuelto'
                             ? `Hola ${t.users?.full_name || ''}!\n\nTu ticket *#${t.ticket_code}* ha sido *resuelto*\nPedido: #${t.orders?.order_code} - ${t.orders?.products?.name}\n` +
@@ -305,212 +254,180 @@ export default function ProveedorSoporte() {
                         }
                       />
                     )}
-                    <button onClick={() => { setRenewModal(t); setRenewDays(30); setRenewError('') }}
-                      style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-green-bg)', border: '1px solid var(--status-green)', color: 'var(--status-green)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
-                      <IconRefreshCw size={13} />Renovar
-                    </button>
-                    <button onClick={() => { setCancelModal(t); setCancelNote(''); setCancelDone(false); setCancelError('') }}
-                      style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--status-red-bg)', border: '1px solid var(--status-red)', color: 'var(--status-red)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
-                      <IconX size={13} />Anular venta
-                    </button>
+                    <button onClick={() => { setRenewModal(t); setRenewDays(30); setRenewError('') }} className="btn-secondary btn-sm lg:w-full"><IconRefreshCw size={14} />Renovar</button>
+                    <button onClick={() => { setCancelModal(t); setCancelNote(''); setCancelDone(false); setCancelError('') }} className="btn-danger btn-sm lg:w-full"><IconX size={14} />Anular venta</button>
                     {t.status === 'resuelto' && (
-                      <button onClick={() => deleteTicket(t.id)} disabled={deletingId === t.id}
-                        style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, background: 'var(--surface-overlay)', border: '1px solid var(--surface-border)', color: 'var(--ink-faint)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, opacity: deletingId === t.id ? 0.5 : 1 }}>
-                        {deletingId === t.id ? <Spinner size={13} /> : <IconTrash size={13} />}
-                        Eliminar
+                      <button onClick={() => deleteTicket(t.id)} disabled={deletingId === t.id} className="btn-ghost btn-sm lg:w-full justify-center hover:!text-[var(--status-red)]">
+                        {deletingId === t.id ? <Spinner size={13} /> : <IconTrash size={14} />}Eliminar
                       </button>
                     )}
                   </div>
                 </div>
-              </div>
+              </article>
             )
           })}
         </div>
       )}
 
-      {/* ══ MODAL: RESPONDER TICKET — con WA al guardar como resuelto ══ */}
-      <Modal open={!!modal} onClose={() => setModal(null)} title={`Ticket #${modal?.ticket_code}`} maxWidth="max-w-lg">
+      {/* ══ RESPONDER ══ */}
+      <Modal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        title={modal ? getReasonLabel(modal.reason) : ''}
+        subtitle={modal ? `#${modal.ticket_code} · ${modal.orders?.products?.name} · ${modal.users?.full_name || modal.users?.email || ''}` : ''}
+        maxWidth="max-w-lg"
+      >
         {modal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '9px 12px', fontSize: 12 }}>
-              <p style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{getReasonLabel(modal.reason)}</p>
-              <p style={{ color: 'var(--ink-muted)' }}>Pedido #{modal.orders?.order_code} · {modal.orders?.products?.name}</p>
-              {modal.description && <p style={{ color: 'var(--ink-faint)', marginTop: 4 }}>{modal.description}</p>}
-            </div>
+          <div className="space-y-4">
+            {modal.description && <p className="inset px-3.5 py-2.5 text-[13px] text-[var(--ink)] leading-relaxed">“{modal.description}”</p>}
             {activeCredFields.length > 0 && (
-              <div style={{ border: '1px solid var(--surface-border)', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 12px', background: 'var(--surface-overlay)' }}>
-                  <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)' }}>
-                    Credenciales{credsSaved && <span style={{ marginLeft: 8, color: 'var(--status-green)' }}>✓ Guardadas</span>}
-                  </p>
-                  <button onClick={openEditCreds}
-                    style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, background: 'transparent', color: 'var(--ink-muted)', border: '1px solid var(--surface-border)', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <IconEdit size={11} />Editar
-                  </button>
+              <div className="rounded-xl border border-[var(--surface-border)] overflow-hidden">
+                <div className="flex items-center justify-between px-3.5 py-2 bg-[var(--surface-side)] border-b border-[var(--surface-border)]">
+                  <p className="eyebrow !text-[10px]">Credenciales {credsSaved && <span className="text-[var(--a)] normal-case tracking-normal">· guardadas</span>}</p>
+                  <button onClick={openEditCreds} className="btn-ghost btn-sm !py-1"><IconEdit size={12} />Cambiar</button>
                 </div>
-                <div style={{ padding: '8px 12px', fontSize: 12, fontFamily: 'DM Mono, monospace', color: 'var(--ink-muted)', lineHeight: 1.9 }}>
-                  {activeCredFields.map(f => (
-                    <div key={f.key}>{f.label}: <span style={{ color: 'var(--ink)' }}>{modal.stock_item[f.key]}</span></div>
-                  ))}
+                <div className="px-3.5 py-2.5 font-mono text-[12.5px] text-[var(--ink-muted)] leading-[1.9]">
+                  {activeCredFields.map(f => <div key={f.key}>{f.label}: <span className="text-[var(--ink)]">{modal.stock_item[f.key]}</span></div>)}
                 </div>
               </div>
             )}
             <div>
-              <label className="label">Tu respuesta al distribuidor</label>
-              <textarea className="input" rows={3} style={{ resize: 'none' }}
-                placeholder="Explica qué hiciste o qué debe hacer el distribuidor..."
-                value={response} onChange={e => setResponse(e.target.value)} />
+              <label className="label">Tu respuesta</label>
+              <textarea className="input" rows={3} placeholder="Ej: Ya cambié la contraseña, vuelve a intentar con la nueva." value={response} onChange={e => setResponse(e.target.value)} autoFocus />
             </div>
             <div>
-              <label className="label">Cambiar estado a</label>
-              <select className="input" value={newStatus} onChange={e => setNewStatus(e.target.value)}>
-                <option value="en_revision">En revisión</option>
-                <option value="resuelto">Resuelto</option>
-              </select>
+              <p className="label">Estado</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[['en_revision', 'En revisión', 'var(--status-yellow)'], ['resuelto', 'Resuelto', 'var(--a)']].map(([v, l, c]) => (
+                  <button key={v} type="button" onClick={() => setNewStatus(v)} className={`btn-secondary btn-sm ${newStatus === v ? 'is-down' : ''}`} style={newStatus === v ? { color: c } : undefined}>
+                    <span className="dot" style={{ color: newStatus === v ? c : 'var(--surface-border-strong)' }} />{l}
+                  </button>
+                ))}
+              </div>
             </div>
             {error && <Alert type="error">{error}</Alert>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-              <button onClick={saveResponse} disabled={saving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                {saving ? <Spinner size={15} /> : 'Guardar y notificar'}
-              </button>
+            <div className="flex flex-wrap gap-2.5 pt-1">
+              <button onClick={() => setModal(null)} className="btn-ghost">Cancelar</button>
+              <div className="flex-1" />
+              {newStatus === 'resuelto' && modal.users?.phone && (
+                <WaBtn
+                  phone={modal.users.phone}
+                  label="Avisar por WhatsApp"
+                  message={`Hola ${modal.users?.full_name || ''}!\n\nTu ticket *#${modal.ticket_code}* ha sido *resuelto*\nPedido: #${modal.orders?.order_code} - ${modal.orders?.products?.name}\n` + (response ? `\nRespuesta: ${response}` : '')}
+                />
+              )}
+              <button onClick={saveResponse} disabled={saving} className="btn-primary min-w-[150px]">{saving ? <Spinner size={15} /> : 'Guardar y notificar'}</button>
             </div>
-            {/* ── WA: notificar al distribuidor que ticket fue resuelto ── */}
-            {newStatus === 'resuelto' && modal.users?.phone && (
-              <WaBtn
-                phone={modal.users.phone}
-                label="Notificar por WhatsApp al resolver"
-                message={
-                  `Hola ${modal.users?.full_name || ''}!\n\n` +
-                  `Tu ticket *#${modal.ticket_code}* ha sido *resuelto*\n` +
-                  `Pedido: #${modal.orders?.order_code} - ${modal.orders?.products?.name}\n` +
-                  (response ? `\nRespuesta: ${response}` : '')
-                }
-              />
-            )}
           </div>
         )}
       </Modal>
 
-      {/* ══ MODAL: EDITAR CREDENCIALES ══ */}
-      <Modal open={showEditCreds} onClose={() => setShowEditCreds(false)} title="Editar credenciales" maxWidth="max-w-md">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <p style={{ fontSize: 12, color: 'var(--status-yellow)', marginBottom: 4 }}>Los cambios se guardan inmediatamente al confirmar.</p>
+      {/* ══ EDITAR CREDENCIALES ══ */}
+      <Modal
+        open={showEditCreds}
+        onClose={() => setShowEditCreds(false)}
+        title="Cambiar credenciales"
+        subtitle="Se guardan al instante y el distribuidor recibe el aviso."
+        maxWidth="max-w-md"
+        footer={<>
+          <button onClick={() => setShowEditCreds(false)} className="btn-ghost">Cancelar</button>
+          <button onClick={saveCredentials} disabled={credsSaving} className="btn-primary min-w-[150px]">{credsSaving ? <Spinner size={15} /> : 'Guardar'}</button>
+        </>}
+      >
+        <div className="space-y-3">
           {Object.entries(creds).filter(([key]) => modal?.stock_item?.[key]).map(([key, val]) => {
-            const labels = { email: 'Email', password: 'Contraseña', url: 'URL', profile_name: 'Perfil', profile_pin: 'PIN', activation_code: 'Código' }
+            const labels = { email: 'Correo', password: 'Contraseña', url: 'URL', profile_name: 'Perfil', profile_pin: 'PIN', activation_code: 'Código' }
             return (
               <div key={key}>
                 <label className="label">{labels[key]}</label>
-                <input className="input" value={val} onChange={e => setCreds(prev => ({ ...prev, [key]: e.target.value }))} />
+                <input className="input font-mono" value={val} onChange={e => setCreds(prev => ({ ...prev, [key]: e.target.value }))} />
               </div>
             )
           })}
           {credsError && <Alert type="error">{credsError}</Alert>}
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button onClick={() => setShowEditCreds(false)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-            <button onClick={saveCredentials} disabled={credsSaving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-              {credsSaving ? <Spinner size={15} /> : 'Guardar credenciales'}
-            </button>
-          </div>
         </div>
       </Modal>
 
-      {/* ══ MODAL: RENOVAR ══ */}
-      <Modal open={!!renewModal} onClose={() => setRenewModal(null)} title="Renovar pedido" maxWidth="max-w-sm">
+      {/* ══ RENOVAR ══ */}
+      <Modal
+        open={!!renewModal}
+        onClose={() => setRenewModal(null)}
+        title="Renovar pedido"
+        subtitle={renewModal ? `${renewModal.orders?.products?.name} · #${renewModal.orders?.order_code}` : ''}
+        maxWidth="max-w-sm"
+        footer={<>
+          <button onClick={() => setRenewModal(null)} className="btn-ghost">Cancelar</button>
+          <button onClick={saveRenewal} disabled={renewSaving} className="btn-primary min-w-[130px]">{renewSaving ? <Spinner size={15} /> : `Renovar +${renewDays} d`}</button>
+        </>}
+      >
         {renewModal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
-              <p style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{renewModal.orders?.products?.name}</p>
-              <p style={{ color: 'var(--ink-muted)' }}>Pedido #{renewModal.orders?.order_code}</p>
-              {renewModal.orders?.expires_at && <p style={{ color: 'var(--ink-faint)', marginTop: 4 }}>Vence: {new Date(renewModal.orders.expires_at).toLocaleDateString()}</p>}
-            </div>
+          <div className="space-y-4">
             <div>
-              <label className="label">Días a agregar</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <p className="label">Días a agregar</p>
+              <div className="flex flex-wrap gap-1.5">
                 {[7, 15, 30, 60].map(d => (
-                  <button key={d} onClick={() => setRenewDays(d)}
-                    style={{ flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', background: renewDays === d ? 'var(--ink)' : 'var(--surface-overlay)', color: renewDays === d ? 'var(--surface)' : 'var(--ink-muted)', border: `1px solid ${renewDays === d ? 'var(--ink)' : 'var(--surface-border)'}` }}>
-                    {d}d
-                  </button>
+                  <button key={d} onClick={() => setRenewDays(d)} className={`btn-secondary btn-sm min-w-[56px] ${renewDays === d ? 'is-down !text-[var(--a)]' : ''}`}>{d} d</button>
                 ))}
+                <input type="number" min={1} max={365} className="input !w-24 !min-h-[2.25rem] font-mono" value={renewDays} onChange={e => setRenewDays(Number(e.target.value))} aria-label="Días personalizados" />
               </div>
-              <input type="number" min={1} max={365} className="input" value={renewDays} onChange={e => setRenewDays(Number(e.target.value))} />
             </div>
             {renewModal.orders?.expires_at && (
-              <div style={{ background: 'var(--status-green-bg)', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: 'var(--status-green)' }}>
-                Nueva fecha: <strong>{(() => {
+              <div className="rounded-xl px-3.5 py-2.5 text-[13px] bg-[var(--a-soft)] border border-[var(--a-line)] flex justify-between">
+                <span className="text-[var(--ink-muted)]">Vence {new Date(renewModal.orders.expires_at).toLocaleDateString('es-PE')} →</span>
+                <span className="font-semibold text-[var(--a)]">{(() => {
                   const base = new Date(renewModal.orders.expires_at) < new Date() ? new Date() : new Date(renewModal.orders.expires_at)
                   base.setDate(base.getDate() + Number(renewDays))
-                  return base.toLocaleDateString()
-                })()}</strong>
+                  return base.toLocaleDateString('es-PE')
+                })()}</span>
               </div>
             )}
             {renewError && <Alert type="error">{renewError}</Alert>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setRenewModal(null)} className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancelar</button>
-              <button onClick={saveRenewal} disabled={renewSaving} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                {renewSaving ? <Spinner size={15} /> : `Renovar +${renewDays}d`}
-              </button>
-            </div>
           </div>
         )}
       </Modal>
 
-      {/* ══ MODAL: ANULAR VENTA ══ */}
-      <Modal open={!!cancelModal} onClose={() => { setCancelModal(null); setCancelDone(false) }} title="Anular venta" maxWidth="max-w-sm">
+      {/* ══ ANULAR VENTA ══ */}
+      <Modal open={!!cancelModal} onClose={() => { setCancelModal(null); setCancelDone(false) }} title="Anular venta" subtitle={cancelModal ? `${cancelModal.orders?.products?.name} · #${cancelModal.orders?.order_code}` : ''} maxWidth="max-w-sm">
         {cancelModal && (cancelDone ? (
-          <div style={{ textAlign: 'center', padding: '16px 0' }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--status-green-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-              <IconCheck size={20} style={{ color: 'var(--status-green)' }} />
-            </div>
-            <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: 600, color: 'var(--ink)' }}>Venta anulada</p>
-            <p style={{ fontSize: 13, color: 'var(--ink-muted)', marginTop: 4 }}>Stock liberado. Distribuidor notificado.</p>
+          <div className="text-center py-5 animate-fade-in">
+            <div className="w-14 h-14 rounded-2xl mx-auto mb-4 grid place-items-center bg-[var(--a-soft)] border border-[var(--a-line)] text-[var(--a)] animate-pop"><IconCheck size={24} /></div>
+            <p className="font-display font-semibold text-lg text-[var(--ink)]">Venta anulada</p>
+            <p className="text-sm text-[var(--ink-muted)] mt-1">Stock liberado y distribuidor notificado.</p>
           </div>
         ) : (() => {
           const order = cancelModal.orders
           const refund = order ? calcRefund(order.price_paid, order.created_at, order.expires_at) : null
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ background: 'var(--surface-overlay)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
-                <p style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{order?.products?.name}</p>
-                <p style={{ color: 'var(--ink-muted)' }}>Pedido #{order?.order_code} · ${order?.price_paid}</p>
-              </div>
+            <div className="space-y-4">
               {refund && (
-                <div style={{ border: '1px solid var(--surface-border)', borderRadius: 10, overflow: 'hidden' }}>
-                  <div style={{ padding: '7px 12px', background: 'var(--surface-overlay)', borderBottom: '1px solid var(--surface-border)' }}>
-                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-faint)' }}>Cálculo de reembolso</p>
-                  </div>
-                  <div style={{ padding: '10px 12px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {[['Precio pagado', `$${order.price_paid}`], ['Días totales', `${refund.totalDays}d`], ['Días usados', `${refund.usedDays}d`], ['Días restantes', `${refund.remainingDays}d`]].map(([k, v]) => (
-                      <div key={k} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--ink-muted)' }}><span>{k}</span><span>{v}</span></div>
+                <div className="rounded-xl border border-[var(--surface-border)] overflow-hidden">
+                  <div className="px-3.5 py-3 text-[13px] space-y-1.5">
+                    {[['Pagó', `$${order.price_paid}`], ['Días totales', `${refund.totalDays}`], ['Días usados', `${refund.usedDays}`], ['Días restantes', `${refund.remainingDays}`]].map(([k, v]) => (
+                      <div key={k} className="flex justify-between text-[var(--ink-muted)]"><span>{k}</span><span className="font-mono">{v}</span></div>
                     ))}
-                    <div style={{ height: 1, background: 'var(--surface-border)', margin: '4px 0' }} />
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Reembolso</span>
-                      <span style={{ fontWeight: 700, color: 'var(--status-green)', fontSize: 14 }}>${refund.refundAmount}</span>
-                    </div>
+                  </div>
+                  <div className="flex justify-between items-center px-3.5 py-3 bg-[var(--a-soft)] border-t border-[var(--a-line)]">
+                    <span className="font-semibold text-sm text-[var(--ink)]">Reembolso proporcional</span>
+                    <span className="font-mono text-lg text-[var(--a)]">${refund.refundAmount}</span>
                   </div>
                 </div>
               )}
               <div>
                 <label className="label">Nota (opcional)</label>
-                <textarea className="input" rows={2} style={{ resize: 'none' }} placeholder="Motivo de la anulación..." value={cancelNote} onChange={e => setCancelNote(e.target.value)} />
+                <textarea className="input" rows={2} placeholder="Motivo de la anulación..." value={cancelNote} onChange={e => setCancelNote(e.target.value)} />
               </div>
               {cancelError && <Alert type="error">{cancelError}</Alert>}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button onClick={() => executeCancel('platform')} disabled={cancelSaving}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px', borderRadius: 10, background: 'var(--status-green-bg)', border: '1px solid var(--status-green)', color: 'var(--status-green)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-                  {cancelSaving ? <Spinner size={15} /> : <><IconDollar size={15} />Devolver ${refund?.refundAmount} en plataforma</>}
+              <div className="space-y-2">
+                <button onClick={() => executeCancel('platform')} disabled={cancelSaving} className="btn-accent w-full">
+                  {cancelSaving ? <Spinner size={15} /> : <><IconDollar size={15} />Devolver ${refund?.refundAmount} a su saldo</>}
                 </button>
-                <button onClick={() => executeCancel('external')} disabled={cancelSaving}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px', borderRadius: 10, background: 'var(--status-yellow-bg)', border: '1px solid var(--status-yellow)', color: 'var(--status-yellow)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
-                  {cancelSaving ? <Spinner size={15} /> : <><IconAlertCircle size={15} />Reembolso externo (${refund?.refundAmount})</>}
+                <button onClick={() => executeCancel('external')} disabled={cancelSaving} className="btn-secondary w-full !text-[var(--status-yellow)]">
+                  {cancelSaving ? <Spinner size={15} /> : <><IconAlertCircle size={15} />Reembolso por fuera (${refund?.refundAmount})</>}
                 </button>
-                <button onClick={() => executeCancel('none')} disabled={cancelSaving}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px', borderRadius: 10, background: 'var(--status-red-bg)', border: '1px solid var(--status-red)', color: 'var(--status-red)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+                <button onClick={() => executeCancel('none')} disabled={cancelSaving} className="btn-danger w-full">
                   {cancelSaving ? <Spinner size={15} /> : <><IconX size={15} />Anular sin reembolso</>}
                 </button>
-                <button onClick={() => setCancelModal(null)} className="btn-secondary" style={{ justifyContent: 'center' }}>Cancelar</button>
+                <button onClick={() => setCancelModal(null)} className="btn-ghost w-full justify-center">Cancelar</button>
               </div>
             </div>
           )
