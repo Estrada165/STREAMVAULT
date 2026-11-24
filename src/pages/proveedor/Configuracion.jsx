@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { PageHeader, Alert, Spinner, Modal, Toggle, PageLoader, CopyField, useToast, useConfirm } from '@/components/ui'
+import { PageHeader, Alert, Spinner, Modal, Toggle, PageLoader, CopyField, Tabs, useToast, useConfirm } from '@/components/ui'
 import { PAYMENT_METHODS, MethodLogo, getMethodMeta } from '@/lib/paymentMethods'
 import { DEFAULT_DUO, APP_FULL_NAME, applyBrand } from '@/lib/brand'
 import BrandColors from '@/components/shared/BrandColors'
@@ -36,6 +37,17 @@ export default function ProveedorConfiguracion() {
   const [methodForm, setMethodForm] = useState({ holder_name: '', account_number: '', qr_url: '' })
   const [methodSaving, setMethodSaving] = useState(false)
   const [methodError, setMethodError] = useState('')
+
+  // Pestañas: menos cosas a la vez (se recuerda en la URL: ?tab=pagos)
+  const [params, setParams] = useSearchParams()
+  const TABS = [
+    { value: 'tienda', label: 'Tienda' },
+    { value: 'pagos', label: 'Pagos' },
+    { value: 'bot', label: 'Bot de códigos' },
+    { value: 'asistente', label: 'Asistente' },
+  ]
+  const tab = TABS.some(t => t.value === params.get('tab')) ? params.get('tab') : 'tienda'
+  const setTab = v => setParams(p => { const n = new URLSearchParams(p); n.set('tab', v); return n }, { replace: true })
 
   useEffect(() => {
     if (provider) {
@@ -148,8 +160,12 @@ export default function ProveedorConfiguracion() {
     <div className={dirty ? 'pb-24' : ''}>
       <PageHeader title="Configuración" subtitle="Tu marca, cómo te encuentran tus distribuidores y cómo te pagan" />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
-        <div className="space-y-5">
+      <div className="mb-5 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <Tabs tabs={TABS} active={tab} onChange={setTab} />
+      </div>
+
+      {tab === 'tienda' && (
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start animate-fade-in">
           {/* Marca */}
           <section className="card p-5 sm:p-6">
             <SectionTitle icon={<IconStore size={18} />} title="Tu marca" subtitle="Lo que ven tus distribuidores al entrar" />
@@ -196,9 +212,11 @@ export default function ProveedorConfiguracion() {
               </div>
             </div>
           </section>
-        </div>
+      </div>
+      )}
 
-        <div className="space-y-5">
+      {tab === 'pagos' && (
+      <div className="max-w-3xl animate-fade-in">
         {/* Métodos de pago */}
         <section className="card p-5 sm:p-6">
           <SectionTitle
@@ -243,10 +261,11 @@ export default function ProveedorConfiguracion() {
             </div>
           ) : <p className="text-[13px] text-[var(--ink-muted)] text-center py-2">Toca un método para configurarlo.</p>}
         </section>
-        <CodeBotSettings />
-        <AssistantSettings />
-        </div>
       </div>
+      )}
+
+      {tab === 'bot' && <div className="max-w-3xl animate-fade-in"><CodeBotSettings /></div>}
+      {tab === 'asistente' && <div className="max-w-3xl animate-fade-in"><AssistantSettings /></div>}
 
       {error && <div className="mt-5"><Alert type="error">{error}</Alert></div>}
 

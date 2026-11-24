@@ -198,12 +198,6 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
               <p className="font-mono text-[15px] text-[var(--ink)]">{formatUSD(order.price_paid)}</p>
               <p className="text-[11px] text-[var(--ink-faint)]">{formatDate(order.created_at)}</p>
             </div>
-            {codeLink && (
-              <a href={codeLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} data-tour={tourFirst ? 'codebot-order' : undefined}
-                className="btn-secondary btn-sm flex-1 sm:flex-none !text-[var(--a)]" title="Abre el bot de códigos de este pedido">
-                <IconZap size={13} />Obtener código
-              </a>
-            )}
             {hasCreds && order.client_whatsapp && (
               <button onClick={e => { e.stopPropagation(); handleSendCreds() }} data-tour={tourFirst && codeLink ? 'codebot-send' : undefined} className="btn-accent btn-sm flex-1 sm:flex-none" title="Enviar credenciales al cliente">
                 <IconWhatsApp size={14} />Enviar
@@ -243,6 +237,20 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
           </div>
         </div>
 
+        {codeLink && (
+          <div className="border-t border-[var(--a-line)] bg-[var(--a-soft)] px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2" data-tour={tourFirst ? 'codebot-order' : undefined}>
+            <span className="w-7 h-7 rounded-lg grid place-items-center bg-[var(--a)] text-[var(--accent-ink,#fff)] flex-shrink-0"><IconZap size={13} /></span>
+            <div className="flex-1 min-w-[150px]">
+              <p className="text-[12.5px] font-semibold text-[var(--ink)] leading-tight">Bot de códigos incluido</p>
+              <p className="text-[11px] text-[var(--ink-muted)] leading-tight mt-0.5">Tu cliente saca sus códigos con este enlace{order.expires_at ? ` · hasta el ${formatDate(order.expires_at)}` : ''}</p>
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <button onClick={copyCodeLink} className="btn-secondary btn-sm flex-1 sm:flex-none">{linkCopied ? <><IconCheck size={13} />Copiado</> : <><IconCopy size={13} />Copiar enlace</>}</button>
+              <a href={codeLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="btn-primary btn-sm flex-1 sm:flex-none"><IconZap size={13} />Obtener código</a>
+            </div>
+          </div>
+        )}
+
         {expanded && hasCreds && (
           <div className="border-t border-[var(--surface-border)] bg-[var(--surface-side)] p-4 animate-fade-in">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -250,21 +258,6 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
                 <CopyField key={f.key} value={item[f.key]} icon={f.icon} label={f.label} hidden={f.hidden} />
               ))}
             </div>
-            {codeLink && (
-              <div className="mt-3 rounded-xl border border-[var(--a-line)] bg-[var(--a-soft)] p-3 flex flex-col sm:flex-row sm:items-center gap-2.5">
-                <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                  <span className="w-8 h-8 rounded-lg grid place-items-center bg-[var(--a)] text-[var(--accent-ink,#fff)] flex-shrink-0"><IconZap size={14} /></span>
-                  <div className="min-w-0">
-                    <p className="text-[12.5px] font-semibold text-[var(--ink)]">Enlace de códigos</p>
-                    <p className="font-mono text-[11px] text-[var(--ink-muted)] truncate">{codeLink}</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={copyCodeLink} className="btn-secondary btn-sm flex-1 sm:flex-none">{linkCopied ? <><IconCheck size={13} />Copiado</> : <><IconCopy size={13} />Copiar</>}</button>
-                  <a href={codeLink} target="_blank" rel="noreferrer" className="btn-primary btn-sm flex-1 sm:flex-none"><IconZap size={13} />Abrir</a>
-                </div>
-              </div>
-            )}
             {item?.extra_notes && (
               <p className="inset mt-3 px-3 py-2.5 text-[13px] text-[var(--ink-muted)] leading-relaxed whitespace-pre-wrap">{item.extra_notes}</p>
             )}

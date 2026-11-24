@@ -51,7 +51,7 @@ export default function CodeBotProductSection({ value, onChange, deliveryType, p
             <span className={`w-9 h-9 rounded-xl grid place-items-center flex-shrink-0 ${on ? 'bg-[var(--a)] text-[var(--accent-ink,#fff)]' : 'inset text-[var(--ink-faint)]'}`}><IconZap size={16} /></span>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-[var(--ink)]">Bot de códigos</p>
-              <p className="text-[11px] text-[var(--ink-muted)]">El comprador recibe su enlace para sacar códigos</p>
+              <p className="text-[11px] text-[var(--ink-muted)]">{on ? 'El comprador recibe su enlace para sacar códigos' : 'Apagado: este producto se vende sin bot'}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -62,7 +62,7 @@ export default function CodeBotProductSection({ value, onChange, deliveryType, p
 
         {status === null ? null : !connected ? (
           <div className="px-3.5 pb-3.5">
-            <p className="text-[12px] text-[var(--ink-muted)] leading-relaxed">Primero conecta tu StreamPanel en <Link to="/proveedor/configuracion" className="text-[var(--a)] font-semibold underline underline-offset-2">Configuración → Bot de códigos</Link>.</p>
+            <p className="text-[12px] text-[var(--ink-muted)] leading-relaxed">Primero conecta tu StreamPanel en <Link to="/proveedor/configuracion?tab=bot" className="text-[var(--a)] font-semibold underline underline-offset-2">Configuración → Bot de códigos</Link>.</p>
           </div>
         ) : on && (
           <div className="px-3.5 pb-3.5 space-y-3.5 animate-fade-in">
@@ -95,6 +95,9 @@ export default function CodeBotProductSection({ value, onChange, deliveryType, p
                     {(v.types || []).includes('account') && <p className="text-[11px] text-[var(--status-yellow)] mt-1.5">El código de 6 dígitos permite cambiar datos de la cuenta. Úsalo solo en cuentas completas.</p>}
                   </div>
                 )}
+                <p className="text-[11.5px] text-[var(--ink-muted)] leading-relaxed rounded-xl px-3 py-2.5 bg-[var(--surface-raised)] border border-[var(--surface-border)]">
+                  <b className="text-[var(--ink)] font-semibold">Tip:</b> si vendes la misma plataforma con y sin bot, crea dos productos (por ejemplo «Netflix perfil» y «Netflix perfil + bot»). En la tienda, este producto mostrará la etiqueta <b className="text-[var(--a)] font-semibold">Incluye bot de códigos</b>.
+                </p>
                 <p className="text-[11.5px] text-[var(--ink-muted)] leading-relaxed">
                   {deliveryType === 'perfil'
                     ? <>Cada perfil vendido recibe <b className="text-[var(--ink)] font-semibold">su propio enlace</b>, aunque compartan el mismo correo. Cada enlace dura lo mismo que su pedido.</>

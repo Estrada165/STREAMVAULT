@@ -98,7 +98,7 @@ async function syncOne({ order, product, stock, distributor, row, link, provider
       label: order.client_name || (distributor?.full_name ? `Cliente de ${distributor.full_name}` : 'Cliente StreamVault'),
       phone: order.client_whatsapp || null,
       meta: {
-        orderCode: order.order_code, productName: product.name, deliveryType: product.delivery_type,
+        orderCode: order.order_code, productName: product.name, deliveryType: product.delivery_type, days: product.duration_days || null,
         store: distributor?.full_name || null, storePhone: distributor?.phone || null, clientName: order.client_name || null,
       },
     }
@@ -141,7 +141,7 @@ async function syncMany(ctx, orderIds) {
 
   const productIds = [...new Set((orders || []).map(o => o.product_id))]
   const { data: products } = productIds.length
-    ? await db().from('products').select('id, name, provider_id, delivery_type, code_bot').in('id', productIds) : { data: [] }
+    ? await db().from('products').select('id, name, provider_id, delivery_type, duration_days, code_bot').in('id', productIds) : { data: [] }
   const prodBy = new Map((products || []).map(p => [p.id, p]))
 
   const stockIds = (orders || []).map(o => o.stock_item_id).filter(Boolean)

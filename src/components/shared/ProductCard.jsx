@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { formatUSD, getDeliveryTypeLabel } from '@/utils'
 import { getPlatformColor, PlatformLogo } from '@/utils/platform'
 import { Modal, Tabs } from '@/components/ui'
-import { IconFileText, IconShield, IconPackage, IconShoppingCart, IconRefreshCw, IconCheck, IconClock } from '@/assets/icons'
+import { IconFileText, IconShield, IconPackage, IconShoppingCart, IconRefreshCw, IconCheck, IconClock, IconZap } from '@/assets/icons'
 
 // ---------- Estilo de la tarjeta (lo elige el proveedor en Productos) ----------
 export const CARD_FIT = {
@@ -129,6 +129,12 @@ export default function ProductCard({ product, exchangeRate = 3.5, onBuy, stockC
             <h3 className="font-display font-semibold text-[15px] leading-snug text-[var(--ink)] line-clamp-2">{product.name}</h3>
             <p className="text-xs text-[var(--ink-muted)] mt-1">{deliveryTypeLabel} · {durationLabel}</p>
           </div>
+
+          {product.code_bot?.enabled && (
+            <p className="inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-[11px] font-semibold text-[var(--a)] bg-[var(--a-soft)] border border-[var(--a-line)]" title="Con cada compra recibes un enlace para sacar los códigos de inicio de sesión, hogar o viaje">
+              <IconZap size={12} />Incluye bot de códigos
+            </p>
+          )}
 
           {isRenewable && (
             <p className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-[var(--b)]">

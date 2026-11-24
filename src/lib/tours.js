@@ -59,8 +59,8 @@ export const TOURS = {
   'codebot-order': [
     {
       target: '[data-tour="codebot-order"]',
-      title: 'Tu enlace de códigos',
-      text: 'Este pedido trae acceso al bot. <b>Obtener código</b> lo abre en otra pestaña y <b>Copiar enlace</b> te lo deja listo para pasárselo a tu cliente. El enlace dura lo mismo que el pedido.',
+      title: 'Este pedido incluye bot de códigos',
+      text: '<b>Obtener código</b> abre el bot en otra pestaña y <b>Copiar enlace</b> te lo deja listo para pasárselo a tu cliente. El enlace dura lo mismo que el pedido y solo muestra ese correo.',
     },
     {
       target: '[data-tour="codebot-send"]',
