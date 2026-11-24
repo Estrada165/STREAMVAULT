@@ -1,13 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, EmptyState, Tabs, PageLoader, SkeletonList, useToast, useConfirm } from '@/components/ui'
 import { PlatformLogo } from '@/utils/platform'
-import { IconPlus, IconEdit, IconTrash, IconDatabase, IconUpload, IconSearch } from '@/assets/icons'
+import { IconPlus, IconEdit, IconTrash, IconDatabase, IconUpload, IconSearch, IconZap, IconCheck, IconAlertCircle } from '@/assets/icons'
+import { codebot, syncOrders } from '@/lib/codebot'
+import { useAutoTour } from '@/components/shared/Tour'
+
+/** ¿El correo está en el StreamPanel del proveedor con la plataforma del producto? */
+function BotBadge({ result, tour }) {
+  if (!result) return <span className="badge !h-5 !text-[10px] opacity-60" data-tour={tour}><IconZap size={10} />revisando…</span>
+  const ok = result.found && result.platform?.linked && result.platform.active && !result.platform.expired && result.emailActive !== false
+  const why = !result.found ? 'No está en tu bot' : !result.platform?.linked ? 'Sin la plataforma en tu bot' : !result.platform.active ? 'Plataforma suspendida en tu bot' : result.platform.expired ? 'Plataforma vencida en tu bot' : 'Correo desactivado en tu bot'
+  return ok
+    ? <span className="badge badge-green !h-5 !text-[10px]" data-tour={tour} title="El comprador recibirá su enlace de códigos"><IconCheck size={10} />En tu bot</span>
+    : <span className="badge badge-yellow !h-5 !text-[10px]" data-tour={tour} title="Regístralo en StreamPanel o se venderá sin enlace de códigos"><IconAlertCircle size={10} />{why}</span>
+}
 
 export default function ProveedorStock() {
-  const { provider } = useAuth()
+  const { provider, profile } = useAuth()
   const [products, setProducts] = useState([])
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [stockItems, setStockItems] = useState([])
@@ -22,6 +34,9 @@ export default function ProveedorStock() {
   const [bulkText, setBulkText] = useState('')
   const [itemSearch, setItemSearch] = useState('')
   const [revealed, setRevealed] = useState({})
+  const [botCheck, setBotCheck] = useState({})       // correo (minúsculas) → resultado de StreamPanel
+  const [botError, setBotError] = useState('')
+  const botTimer = useRef(null)
   const toast = useToast()
   const confirm = useConfirm()
   const location = useLocation()
@@ -32,7 +47,7 @@ export default function ProveedorStock() {
   async function fetchProducts() {
     let { data } = await supabase
       .from('products')
-      .select('id, name, delivery_type, delivery_mode, platforms(name, logo_filename)')
+      .select('*, platforms(name, logo_filename)')
       .eq('provider_id', provider.id)
       .eq('is_active', true)
       .order('name')
@@ -103,6 +118,7 @@ export default function ProveedorStock() {
 
         // If this item is linked to an order, notify distributor
         if (modal.data.order_id) {
+          syncOrders([modal.data.order_id])   // si cambió el correo, el enlace de códigos se actualiza
           const { data: ord } = await supabase.from('orders').select('distributor_id, order_code').eq('id', modal.data.order_id).maybeSingle()
           if (ord) {
             await supabase.from('notifications').insert({
@@ -153,6 +169,8 @@ export default function ProveedorStock() {
     return row
   }).filter(r => Object.values(r).some(Boolean))
 
+  useEffect(() => { if (modal?.type === 'bulk' && bulkFields.includes('email')) checkSoon(bulkRows.map(r => r.email).filter(Boolean)) }, [bulkText, modal?.type])
+
   async function saveBulk() {
     if (!bulkRows.length) return setError('Pega al menos una línea')
     setSaving(true); setError('')
@@ -171,6 +189,26 @@ export default function ProveedorStock() {
     setCounts(m)
   }
   useEffect(() => { refreshCounts() }, [products.length])
+
+  // ── Bot de códigos: ¿los correos están en el StreamPanel del proveedor? ──
+  const bot = selectedProduct?.code_bot?.enabled && selectedProduct.code_bot.platform_id ? selectedProduct.code_bot : null
+  const botKey = e => String(e || '').trim().toLowerCase()
+  async function checkEmails(list) {
+    if (!bot) return
+    const todo = [...new Set(list.map(botKey).filter(e => e.includes('@') && !(e in botCheck)))].slice(0, 500)
+    if (!todo.length) return
+    try {
+      const r = await codebot('check', { emails: todo, platformId: bot.platform_id })
+      setBotError('')
+      setBotCheck(m => { const n = { ...m }; (r.results || []).forEach(x => { n[botKey(x.email)] = x }); return n })
+    } catch (e) { setBotError(e.message) }
+  }
+  useEffect(() => { setBotCheck({}); setBotError('') }, [selectedProduct?.id])
+  useEffect(() => { if (bot && stockItems.length) checkEmails(stockItems.map(i => i.email)) }, [stockItems, bot?.platform_id])
+  // En el formulario y en la carga en lote se revisa mientras escribes (con una pequeña pausa)
+  function checkSoon(list) { clearTimeout(botTimer.current); botTimer.current = setTimeout(() => checkEmails(list), 600) }
+  useEffect(() => { if (modal?.type === 'form' && /.+@.+\..+/.test(form.email)) checkSoon([form.email]) }, [form.email, modal?.type])
+  useAutoTour('codebot-stock', profile, { ready: !!bot && Object.keys(botCheck).length > 0 && stockItems.length > 0 })
 
   const dt = selectedProduct?.delivery_type
   const showEmail = ['cuenta_completa', 'perfil', 'iptv'].includes(dt)
@@ -234,6 +272,10 @@ export default function ProveedorStock() {
                 <button className="btn-primary btn-sm" onClick={openAdd}><IconPlus size={14} />Agregar</button>
               </div>
             </div>
+            {bot && (
+              <p className="text-[11.5px] text-[var(--ink-muted)] inline-flex items-center gap-1.5"><IconZap size={12} className="text-[var(--a)]" />Con bot de códigos ({bot.platform_name}): cada venta entrega su enlace si el correo está en tu StreamPanel.</p>
+            )}
+            {botError && <Alert type="warning">{botError}</Alert>}
             <div className="flex flex-col sm:flex-row gap-2.5">
               <Tabs tabs={[{ label: 'Disponible', value: 'available' }, { label: 'Vendido', value: 'sold' }]} active={tab} onChange={t => setTab(t)} />
               <label className="relative flex-1">
@@ -256,6 +298,7 @@ export default function ProveedorStock() {
                   <span className="dot mt-2" style={{ color: item.is_sold ? 'var(--ink-faint)' : 'var(--a)' }} />
                   <div className="flex-1 min-w-0 text-[13px] leading-relaxed">
                     {item.email && <p className="font-mono text-[var(--ink)] truncate">{item.email}</p>}
+                    {bot && item.email && <div className="mt-1"><BotBadge result={botCheck[botKey(item.email)]} tour={item === items[0] ? 'codebot-stock-badge' : undefined} /></div>}
                     {item.password && <p className="font-mono text-[var(--ink-muted)]">{revealed[item.id] ? item.password : '••••••••'} <button className="text-[11px] text-[var(--a)] font-sans font-semibold ml-1" onClick={() => setRevealed(r => ({ ...r, [item.id]: !r[item.id] }))}>{revealed[item.id] ? 'ocultar' : 'ver'}</button></p>}
                     {item.profile_name && <p className="text-[var(--ink-muted)]">Perfil: {item.profile_name}{item.profile_pin ? ` · PIN ${revealed[item.id] ? item.profile_pin : '••••'}` : ''}</p>}
                     {item.url && <p className="font-mono text-[11px] text-[var(--ink-muted)] truncate">{item.url}</p>}
@@ -287,7 +330,8 @@ export default function ProveedorStock() {
       >
         <div className="space-y-4">
           {modal?.data?.order_id && <Alert type="info">Esta cuenta ya se vendió. Al guardar, el distribuidor recibe un aviso de credenciales actualizadas.</Alert>}
-          {showEmail && <div><label className="label">Correo</label><input className="input font-mono" placeholder="correo@ejemplo.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>}
+          {showEmail && <div><label className="label">Correo</label><input className="input font-mono" placeholder="correo@ejemplo.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+            {bot && /.+@.+\..+/.test(form.email) && <div className="mt-1.5"><BotBadge result={botCheck[botKey(form.email)]} /></div>}</div>}
           {showPassword && <div><label className="label">Contraseña</label><input className="input font-mono" placeholder="contraseña" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div>}
           {showUrl && <div><label className="label">URL</label><input className="input font-mono !text-[13px]" placeholder="http://..." value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} /></div>}
           {showProfile && (
@@ -336,11 +380,14 @@ export default function ProveedorStock() {
               <table className="!text-xs">
                 <tbody>
                   {bulkRows.slice(0, 8).map((r, i) => (
-                    <tr key={i} className="!border-0">{bulkFields.map((f, fi) => <td key={f} className="!py-1 !px-2 font-mono truncate max-w-[160px]">{r[f] || (fi === 0 ? <span className="text-[var(--status-red)]">falta</span> : <span className="text-[var(--ink-faint)]">—</span>)}</td>)}</tr>
+                    <tr key={i} className="!border-0">{bulkFields.map((f, fi) => <td key={f} className="!py-1 !px-2 font-mono truncate max-w-[160px]">{r[f] || (fi === 0 ? <span className="text-[var(--status-red)]">falta</span> : <span className="text-[var(--ink-faint)]">—</span>)}</td>)}
+                      {bot && r.email && <td className="!py-1 !px-2"><BotBadge result={botCheck[botKey(r.email)]} /></td>}</tr>
                   ))}
                 </tbody>
               </table>
               {bulkRows.length > 8 && <p className="text-[11px] text-[var(--ink-faint)] mt-1">…y {bulkRows.length - 8} más</p>}
+              {bot && (() => { const bad = bulkRows.filter(r => r.email && botCheck[botKey(r.email)] && !(botCheck[botKey(r.email)].found && botCheck[botKey(r.email)].platform?.linked)).length
+                return bad > 0 && <p className="text-[11.5px] text-[var(--status-yellow)] mt-2">{bad} correo{bad === 1 ? '' : 's'} no {bad === 1 ? 'está' : 'están'} en tu StreamPanel con {bot.platform_name}: se {bad === 1 ? 'venderá' : 'venderán'} sin enlace de códigos.</p> })()}
             </div>
           )}
           {error && <Alert type="error">{error}</Alert>}

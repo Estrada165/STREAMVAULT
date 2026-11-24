@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useOrderAccess, syncPending } from '@/lib/codebot'
+import { useAutoTour } from '@/components/shared/Tour'
 import { useAuth } from '@/context/AuthContext'
 import { useBalance } from '@/hooks/useBalance'
 import { useSettings } from '@/hooks/useSettings'
@@ -19,6 +21,11 @@ export default function DistDashboard() {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('activo')
   const [search, setSearch] = useState('')
+  // Bot de códigos: enlaces de los pedidos + puesta al día de lo pendiente al entrar
+  const { access, merge: mergeAccess, reload: reloadAccess } = useOrderAccess(orders.map(o => o.id))
+  useEffect(() => { if (profile && orders.length) syncPending().then(r => { if (Object.keys(r).length) reloadAccess() }) }, [profile, orders.length])
+  const firstWithLink = orders.find(o => o.status === 'activo' && access[o.id]?.status === 'active')?.id
+  useAutoTour('codebot-order', profile, { ready: !!firstWithLink && tab !== 'expirado', delay: 900 })
 
   const exchangeRate = parseFloat(settings?.exchange_rate) || 3.5
 
@@ -158,7 +165,8 @@ export default function DistDashboard() {
           {search && <p className="text-xs text-[var(--ink-faint)] mb-3">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''} para "{search}"</p>}
           <div className="flex flex-col gap-3 stagger">
             {filtered.map(order => (
-              <OrderCard key={order.id} order={order} template={template} exchangeRate={exchangeRate} onCredentialsUpdated={fetchOrders} />
+              <OrderCard key={order.id} order={order} template={template} exchangeRate={exchangeRate} onCredentialsUpdated={fetchOrders}
+                access={access[order.id]} onAccessChange={mergeAccess} tourFirst={order.id === firstWithLink} />
             ))}
           </div>
         </>

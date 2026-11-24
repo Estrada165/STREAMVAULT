@@ -4,6 +4,7 @@ import { useCart } from '@/context/CartContext'
 import { useBalance } from '@/hooks/useBalance'
 import { useSettings } from '@/hooks/useSettings'
 import { supabase } from '@/lib/supabase'
+import { syncOrders, resetSyncThrottle } from '@/lib/codebot'
 import { PageHeader, Modal, Alert, Spinner, EmptyState } from '@/components/ui'
 import { PlatformLogo } from '@/utils/platform'
 import { IconShoppingCart, IconTrash, IconCheck, IconPlus, IconX } from '@/assets/icons'
@@ -53,6 +54,9 @@ export default function Carrito() {
         p_client_whatsapp: clientPhone.trim(),
       })
       if (rpcErr) throw rpcErr
+      // Bot de códigos: crea el enlace de cada pedido (en segundo plano, no frena la compra)
+      resetSyncThrottle()
+      syncOrders((data?.orders || []).map(o => o.id))
 
       setCreatedCount(data?.orders?.length || count)
       clearCart()

@@ -6,6 +6,7 @@ import { PAYMENT_METHODS, MethodLogo, getMethodMeta } from '@/lib/paymentMethods
 import { DEFAULT_DUO, APP_FULL_NAME, applyBrand } from '@/lib/brand'
 import BrandColors from '@/components/shared/BrandColors'
 import AssistantSettings from '@/components/shared/AssistantSettings'
+import CodeBotSettings from '@/components/shared/CodeBotSettings'
 import { IconSettings, IconTrash, IconStore } from '@/assets/icons'
 
 function SectionTitle({ icon, title, subtitle }) {
@@ -242,6 +243,7 @@ export default function ProveedorConfiguracion() {
             </div>
           ) : <p className="text-[13px] text-[var(--ink-muted)] text-center py-2">Toca un método para configurarlo.</p>}
         </section>
+        <CodeBotSettings />
         <AssistantSettings />
         </div>
       </div>
