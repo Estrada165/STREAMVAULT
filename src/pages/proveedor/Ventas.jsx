@@ -9,6 +9,25 @@ import { PlatformLogo } from '@/utils/platform'
 import { IconSearch, IconDownload, IconEdit, IconRefreshCw, IconCopy, IconTrash, IconWhatsApp, IconX, IconTrendingUp } from '@/assets/icons'
 import { formatUSD, formatDateTime, formatDate, getStatusLabel } from '@/utils'
 import { waLink } from '@/lib/whatsapp'
+import { useOrderAccess, syncOrders, syncPending } from '@/lib/codebot'
+import { IconZap, IconAlertCircle } from '@/assets/icons'
+
+/** Estado del enlace del bot de códigos de un pedido (solo si el producto lo usa) */
+function BotPill({ a, onRetry }) {
+  const [busy, setBusy] = useState(false)
+  if (!a || a.status === 'revoked') return null
+  if (a.status === 'active') return (
+    <a href={a.link} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[var(--a)] hover:underline" title="Enlace del bot de códigos del comprador">
+      <IconZap size={11} />Bot activo
+    </a>
+  )
+  return (
+    <button type="button" disabled={busy} onClick={async () => { setBusy(true); await onRetry(); setBusy(false) }}
+      className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[var(--status-yellow)] hover:underline text-left" title={a.error || 'Pendiente'}>
+      <IconAlertCircle size={11} />{busy ? 'Reintentando…' : a.status === 'error' ? `Bot: ${a.error_code === 'EMAIL_NOT_FOUND' ? 'correo no está en tu StreamPanel' : a.error_code === 'NOT_CONNECTED' ? 'StreamPanel sin conectar' : 'error'} · reintentar` : 'Bot pendiente · reintentar'}
+    </button>
+  )
+}
 
 function CopyBtn({ value }) {
   const [copied, setCopied] = useState(false)
@@ -34,6 +53,9 @@ export default function ProveedorVentas() {
   const toast = useToast()
   const [visible, setVisible] = useState(40)
   const [orders, setOrders] = useState([])
+  const { access, merge: mergeAccess, reload: reloadAccess } = useOrderAccess(orders.map(o => o.id))
+  useEffect(() => { if (orders.length) syncPending().then(r => { if (Object.keys(r).length) reloadAccess() }) }, [orders.length])
+  const retryBot = id => syncOrders([id]).then(mergeAccess)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const location = useLocation()
@@ -158,6 +180,7 @@ const stocks = allStocks
         type: 'success', ref_id: modal.id,
       })
       setModal(null); fetchOrders()
+      syncOrders([modal.id]).then(mergeAccess)
       toast.success('Credenciales guardadas y distribuidor notificado')
     } catch (e) { setSaveError(e.message) }
     setSaving(false)
@@ -187,6 +210,7 @@ const stocks = allStocks
       // Cobro + nueva fecha + movimiento + aviso en un solo paso (el costo lo calcula la base de datos)
       const { error: rpcErr } = await supabase.rpc('renew_order', { p_order: renewModal.id, p_days: parseInt(renewDays), p_charge: true })
       if (rpcErr) throw new Error(rpcError(rpcErr))
+      syncOrders([renewModal.id]).then(mergeAccess)
       setRenewModal(null); fetchOrders()
       toast.success(`Renovado por ${renewDays} días`)
     } catch (e) { setSaveError(e.message) }
@@ -207,6 +231,7 @@ const stocks = allStocks
       }
       await supabase.from('support_tickets').delete().eq('order_id', order.id)
       await supabase.from('orders').delete().eq('id', order.id)
+      syncOrders([order.id])   // el enlace de códigos del pedido borrado se desactiva
       setOrders(prev => prev.filter(o => o.id !== order.id))
       setDeleteModal(null)
       toast.success('Pedido eliminado')
@@ -220,6 +245,7 @@ const stocks = allStocks
     try {
       await supabase.from('support_tickets').delete().eq('order_id', order.id)
       await supabase.from('orders').delete().eq('id', order.id)
+      syncOrders([order.id])
       if (order.stock_item_id) {
         await supabase.from('stock_items').delete().eq('id', order.stock_item_id)
       }
@@ -388,6 +414,7 @@ const stocks = allStocks
                       <td>
                         <Badge color={STATUS_BADGE[m.displayStatus] || 'neutral'} dot>{getStatusLabel(m.displayStatus)}</Badge>
                         <div className="mt-1"><Expiry o={o} m={m} /></div>
+                        <BotPill a={access[o.id]} onRetry={() => retryBot(o.id)} />
                       </td>
                       <td><Actions o={o} m={m} /></td>
                     </tr>
@@ -423,6 +450,7 @@ const stocks = allStocks
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge color={STATUS_BADGE[m.displayStatus] || 'neutral'} dot>{getStatusLabel(m.displayStatus)}</Badge>
                       <Expiry o={o} m={m} />
+                      <BotPill a={access[o.id]} onRetry={() => retryBot(o.id)} />
                     </div>
                     <Actions o={o} m={m} />
                   </div>

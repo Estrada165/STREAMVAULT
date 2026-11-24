@@ -6,8 +6,10 @@ import { Link } from 'react-router-dom'
 import { PageHeader, Modal, Alert, Spinner, EmptyState, Toggle, Tabs, Badge, PageLoader, useToast, useConfirm } from '@/components/ui'
 import { getPlatformColor } from '@/utils/platform'
 import { ProductCover, normalizeCardStyle, CARD_FIT, CARD_POS, CARD_COLOR_USES } from '@/components/shared/ProductCard'
-import { IconPlus, IconEdit, IconTrash, IconBox, IconRefreshCw, IconSearch, IconDatabase } from '@/assets/icons'
+import { IconPlus, IconEdit, IconTrash, IconBox, IconRefreshCw, IconSearch, IconDatabase, IconZap } from '@/assets/icons'
 import { formatUSD, getDeliveryTypeLabel } from '@/utils'
+import CodeBotProductSection from '@/components/shared/CodeBotProductSection'
+import { codebot } from '@/lib/codebot'
 
 const DELIVERY_TYPES = [
   { value: 'cuenta_completa', label: 'Cuenta Completa' },
@@ -126,7 +128,7 @@ export default function ProveedorProductos() {
     delivery_type: 'perfil', custom_delivery_type: '',
     delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
     terms: '', warranty: '', what_includes: '', image_url: '',
-    is_renewable: false, renewal_price_pen: '', card_style: {},
+    is_renewable: false, renewal_price_pen: '', card_style: {}, code_bot: {},
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -164,7 +166,7 @@ export default function ProveedorProductos() {
       name: '', delivery_type: 'perfil', custom_delivery_type: '',
       delivery_mode: 'stock', price_pen: '', duration_days: 30, stock_qty: '',
       terms: '', warranty: '', what_includes: '', image_url: '',
-      is_renewable: false, renewal_price_pen: '', card_style: {},
+      is_renewable: false, renewal_price_pen: '', card_style: {}, code_bot: {},
     })
     setError(''); setModal({ type: 'form' })
   }
@@ -183,6 +185,7 @@ export default function ProveedorProductos() {
       is_renewable: p.is_renewable || false,
       renewal_price_pen: p.renewal_price_usd ? (p.renewal_price_usd * rate).toFixed(2) : '',
       card_style: normalizeCardStyle(p.card_style),
+      code_bot: p.code_bot || {},
     })
     setError(''); setModal({ type: 'form', data: p })
   }
@@ -192,6 +195,7 @@ export default function ProveedorProductos() {
     if (isCustomPlatform && !form.custom_platform_name.trim()) return setError('Escribe el nombre de la plataforma')
     if (!form.name) return setError('El nombre del producto es requerido')
     if (isCustomType && !form.custom_delivery_type.trim()) return setError('Escribe el tipo personalizado')
+    if (form.code_bot?.enabled && !form.code_bot.platform_id) return setError('Bot de códigos: elige la plataforma de tu StreamPanel')
     const penVal = parseFloat(form.price_pen)
     if (!penVal || penVal <= 0) return setError('Ingresa un precio en soles válido')
     const priceUsd = parseFloat(penToUsd(penVal))
@@ -226,6 +230,10 @@ export default function ProveedorProductos() {
       const cs = normalizeCardStyle(form.card_style)
       const before = normalizeCardStyle(modal?.data?.card_style)
       if (JSON.stringify(cs) !== JSON.stringify(before)) payload.card_style = cs
+      // El bot de códigos solo se envía si cambió (requiere el SQL 012)
+      const bot = form.code_bot?.enabled || modal?.data?.code_bot ? { enabled: !!form.code_bot?.enabled, platform_id: form.code_bot?.platform_id || null, platform_name: form.code_bot?.platform_name || null, types: form.code_bot?.types || [] } : null
+      const botChanged = JSON.stringify(bot) !== JSON.stringify(modal?.data?.code_bot ?? null)
+      if (botChanged) payload.code_bot = bot
       if (modal?.data) {
         const { error: err } = await supabase.from('products').update(payload).eq('id', modal.data.id)
         if (err) throw err
@@ -235,7 +243,9 @@ export default function ProveedorProductos() {
       }
       setModal(null); fetchProducts()
       toast.success(modal?.data ? 'Producto actualizado' : 'Producto creado')
-    } catch (e) { setError(e.message?.includes('card_style') ? 'Falta ejecutar el SQL 007 (estilo de tarjeta) en Supabase.' : e.message) }
+      // Los pedidos activos de este producto se ponen al día (tipos de código, bot activado o apagado)
+      if (payload.code_bot !== undefined && modal?.data) codebot('sync', { all: true }).catch(() => {})
+    } catch (e) { setError(e.message?.includes('card_style') ? 'Falta ejecutar el SQL 007 (estilo de tarjeta) en Supabase.' : e.message?.includes('code_bot') ? 'Falta ejecutar el SQL 012 (bot de códigos) en Supabase.' : e.message) }
     setSaving(false)
   }
 
@@ -317,6 +327,7 @@ export default function ProveedorProductos() {
                         ? <Badge color={stock === 0 ? 'red' : stock < 3 ? 'yellow' : 'green'} dot>{stock === 0 ? 'Sin stock' : `${stock} en stock`}</Badge>
                         : <Badge color="violet">A pedido{p.stock_qty > 0 ? ` · ${p.stock_qty}` : p.stock_qty === 0 ? ' · agotado' : ''}</Badge>}
                       {p.is_renewable && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--b)]"><IconRefreshCw size={11} />Renovable</span>}
+                      {p.code_bot?.enabled && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--a)]" title={`Entrega enlace del bot de códigos (${p.code_bot.platform_name || ''})`}><IconZap size={11} />Bot de códigos</span>}
                     </div>
                   </div>
 
@@ -433,6 +444,13 @@ export default function ProveedorProductos() {
               </div>
             )}
           </fieldset>
+
+          <CodeBotProductSection
+            value={form.code_bot}
+            onChange={code_bot => setForm(f => ({ ...f, code_bot }))}
+            deliveryType={form.delivery_type}
+            platformName={form.custom_platform_name || platforms.find(x => x.id === form.platform_id)?.name || ''}
+          />
 
           <fieldset className="space-y-3 pt-5 border-t border-[var(--surface-border)]">
             <div className={`rounded-2xl border transition-colors ${form.is_renewable ? 'border-[var(--b-line)] bg-[var(--b-soft)]' : 'border-[var(--surface-border)]'}`}>

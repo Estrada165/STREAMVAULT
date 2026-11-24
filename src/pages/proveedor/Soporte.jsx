@@ -2,6 +2,7 @@ import { useLocation } from 'react-router-dom'
 import { rpcError } from '@/lib/rpcError'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { syncOrders } from '@/lib/codebot'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader, Modal, Alert, Spinner, Badge, EmptyState, Tabs, SkeletonList } from '@/components/ui'
 import { IconHeadphones, IconEdit, IconX, IconCheck, IconAlertCircle, IconRefreshCw, IconDollar, IconTrash, IconWhatsApp, IconMail, IconKey, IconUser, IconLink } from '@/assets/icons'
@@ -149,6 +150,7 @@ export default function ProveedorSoporte() {
       // Renovación de cortesía (sin cobro): fecha + aviso en un solo paso
       const { error: rpcErr } = await supabase.rpc('renew_order', { p_order: renewModal.orders?.id, p_days: Number(renewDays), p_charge: false })
       if (rpcErr) throw new Error(rpcError(rpcErr))
+      syncOrders([renewModal.orders?.id])
       if (renewModal.status !== 'resuelto') {
         await supabase.from('support_tickets').update({ status: 'resuelto', updated_at: new Date().toISOString() }).eq('id', renewModal.id)
       }
@@ -170,6 +172,7 @@ export default function ProveedorSoporte() {
         p_ticket: cancelModal.id,
       })
       if (rpcErr) throw new Error(rpcError(rpcErr))
+      syncOrders([cancelModal.orders.id])   // el enlace de códigos se desactiva
       setCancelDone(true)
       setTimeout(() => { setCancelModal(null); setCancelDone(false); fetchTickets() }, 2000)
     } catch (e) {

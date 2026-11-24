@@ -183,7 +183,7 @@ export default function DistPerfil() {
     setSavingTemplate(false)
   }
 
-  const VARS = ['{nombre_cliente}', '{plataforma}', '{correo}', '{contrasena}', '{perfil}', '{pin}', '{url}', '{codigo}', '{duracion}', '{fecha_vencimiento}']
+  const VARS = ['{nombre_cliente}', '{plataforma}', '{correo}', '{contrasena}', '{perfil}', '{pin}', '{url}', '{codigo}', '{duracion}', '{fecha_vencimiento}', '{enlace_codigos}']
   const preview = fillTemplate(template || DEFAULT_TEMPLATE, {
     clientName: 'María', platformName: 'Netflix', email: 'cuenta01@correo.com', password: 'Clave2026',
     profileName: 'Perfil 3', profilePin: '1234', durationDays: 30, expiresAt: new Date(Date.now() + 30 * 864e5).toISOString(), orderCode: 'ORD-8F2A91C3',

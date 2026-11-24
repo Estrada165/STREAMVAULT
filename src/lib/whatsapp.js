@@ -11,6 +11,7 @@ export const DEFAULT_TEMPLATE = `👋 ¡Hola {nombre_cliente}!
 🔢 PIN: {pin}
 🔗 URL: {url}
 🎟️ Código: {codigo}
+🔐 Tus códigos aquí: {enlace_codigos}
 
 ⏳ Duración: {duracion} días
 📅 Vence: {fecha_vencimiento}
@@ -35,7 +36,9 @@ export function waLink(phone, text) {
  * Falls back to DEFAULT_TEMPLATE if template is empty/null.
  */
 export function buildWhatsAppUrl(phone, template, variables) {
-  const tpl = (template && template.trim()) ? template : DEFAULT_TEMPLATE
+  let tpl = (template && template.trim()) ? template : DEFAULT_TEMPLATE
+  // Plantillas propias sin la variable del bot: el enlace de códigos se agrega al final
+  if (variables.codeLink && !tpl.includes('{enlace_codigos}')) tpl = `${tpl.trimEnd()}\n\n🔐 Tus códigos aquí: {enlace_codigos}`
   const message = fillTemplate(tpl, variables)
 
   return waLink(phone, message)
@@ -56,6 +59,7 @@ export function fillTemplate(template, variables) {
     '{pin}': variables.profilePin || '',
     '{url}': variables.url || '',
     '{codigo}': variables.activationCode || '',
+    '{enlace_codigos}': variables.codeLink || '',
     '{duracion}': variables.durationDays?.toString() || '30',
     '{fecha_vencimiento}': variables.expiresAt
       ? format(new Date(variables.expiresAt), "d 'de' MMMM yyyy", { locale: es })

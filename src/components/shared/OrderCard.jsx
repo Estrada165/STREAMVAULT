@@ -8,8 +8,9 @@ import { supabase } from '@/lib/supabase'
 import PhoneInput from './PhoneInput'
 import {
   IconWhatsApp, IconHeadphones, IconSend, IconClock,
-  IconMail, IconKey, IconLink, IconHash, IconUser, IconRefreshCw, IconChevronDown, IconAlertCircle, IconEdit
+  IconMail, IconKey, IconLink, IconHash, IconUser, IconRefreshCw, IconChevronDown, IconAlertCircle, IconEdit, IconZap, IconCopy, IconCheck
 } from '@/assets/icons'
+import { syncOrders } from '@/lib/codebot'
 import SupportForm from './SupportForm'
 
 function daysRemaining(expiresAt) {
@@ -25,7 +26,9 @@ const STATUS_CONFIG = {
   cancelado: { label: 'Cancelado', badge: 'red' },
 }
 
-export default function OrderCard({ order, template, exchangeRate = 3.5, onCredentialsUpdated }) {
+export default function OrderCard({ order, template, exchangeRate = 3.5, onCredentialsUpdated, access, onAccessChange, tourFirst = false }) {
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [showSupport, setShowSupport] = useState(false)
   const [renewDismissed, setRenewDismissed] = useState(false)
@@ -46,6 +49,22 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
   const showRenewBtn = order.status === 'activo' || order.status === 'expirado'
   // Mostrar botón de aviso al cliente cuando vence en ≤7 días y hay número
   const showNotifyClient = order.status === 'activo' && days !== null && days <= 7 && !!order.client_whatsapp
+  // Bot de códigos: enlace del comprador (solo si el pedido está vigente)
+  const codeLink = order.status === 'activo' && access?.status === 'active' ? access.link : null
+  const codeIssue = order.status === 'activo' && hasCreds && access && (access.status === 'pending' || access.status === 'error') ? access : null
+
+  function copyCodeLink(e) {
+    e?.stopPropagation()
+    navigator.clipboard?.writeText(codeLink).catch(() => {})
+    setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000)
+  }
+  async function retryAccess(e) {
+    e?.stopPropagation()
+    setRetrying(true)
+    const r = await syncOrders([order.id])
+    onAccessChange?.(r)
+    setRetrying(false)
+  }
 
   function handleSendCreds() {
     if (!order.client_whatsapp) return
@@ -61,6 +80,7 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
       durationDays: product?.duration_days,
       expiresAt: order.expires_at,
       orderCode: order.order_code,
+      codeLink,
     })
     window.open(url, '_blank')
   }
@@ -106,6 +126,7 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
         .eq('id', order.id)
       if (error) throw error
       onCredentialsUpdated?.()
+      if (access) syncOrders([order.id]).then(r => onAccessChange?.(r))
       setShowEditClient(false)
     } catch (e) { setEditError(e.message) }
     setEditSaving(false)
@@ -177,12 +198,26 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
               <p className="font-mono text-[15px] text-[var(--ink)]">{formatUSD(order.price_paid)}</p>
               <p className="text-[11px] text-[var(--ink-faint)]">{formatDate(order.created_at)}</p>
             </div>
+            {codeLink && (
+              <a href={codeLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} data-tour={tourFirst ? 'codebot-order' : undefined}
+                className="btn-secondary btn-sm flex-1 sm:flex-none !text-[var(--a)]" title="Abre el bot de códigos de este pedido">
+                <IconZap size={13} />Obtener código
+              </a>
+            )}
             {hasCreds && order.client_whatsapp && (
-              <button onClick={e => { e.stopPropagation(); handleSendCreds() }} className="btn-accent btn-sm flex-1 sm:flex-none" title="Enviar credenciales al cliente">
+              <button onClick={e => { e.stopPropagation(); handleSendCreds() }} data-tour={tourFirst && codeLink ? 'codebot-send' : undefined} className="btn-accent btn-sm flex-1 sm:flex-none" title="Enviar credenciales al cliente">
                 <IconWhatsApp size={14} />Enviar
               </button>
             )}
-            {!hasCreds && order.status === 'pendiente_credenciales' && (
+            {codeIssue && (
+          <div className={`border-t border-[var(--surface-border)] px-4 py-2.5 flex flex-wrap items-center gap-2 text-[12.5px] ${codeIssue.status === 'error' ? 'text-[var(--status-yellow)]' : 'text-[var(--b)]'}`}>
+            {codeIssue.status === 'error' ? <IconAlertCircle size={13} className="flex-shrink-0" /> : <span className="dot animate-pulse-soft" />}
+            <p className="flex-1 min-w-[180px]">{codeIssue.status === 'error' ? <>Enlace de códigos pendiente: {codeIssue.error || 'no se pudo crear'}.</> : 'Preparando tu enlace de códigos…'}</p>
+            <button onClick={retryAccess} disabled={retrying} className="btn-ghost btn-sm !text-current">{retrying ? 'Reintentando…' : <><IconRefreshCw size={12} />Reintentar</>}</button>
+          </div>
+        )}
+
+        {!hasCreds && order.status === 'pendiente_credenciales' && (
               <button onClick={e => { e.stopPropagation(); handleNotifyProvider() }} className="btn-secondary btn-sm btn-violet flex-1 sm:flex-none">
                 <IconSend size={13} />Avisar proveedor
               </button>
@@ -215,6 +250,21 @@ export default function OrderCard({ order, template, exchangeRate = 3.5, onCrede
                 <CopyField key={f.key} value={item[f.key]} icon={f.icon} label={f.label} hidden={f.hidden} />
               ))}
             </div>
+            {codeLink && (
+              <div className="mt-3 rounded-xl border border-[var(--a-line)] bg-[var(--a-soft)] p-3 flex flex-col sm:flex-row sm:items-center gap-2.5">
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <span className="w-8 h-8 rounded-lg grid place-items-center bg-[var(--a)] text-[var(--accent-ink,#fff)] flex-shrink-0"><IconZap size={14} /></span>
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-semibold text-[var(--ink)]">Enlace de códigos</p>
+                    <p className="font-mono text-[11px] text-[var(--ink-muted)] truncate">{codeLink}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={copyCodeLink} className="btn-secondary btn-sm flex-1 sm:flex-none">{linkCopied ? <><IconCheck size={13} />Copiado</> : <><IconCopy size={13} />Copiar</>}</button>
+                  <a href={codeLink} target="_blank" rel="noreferrer" className="btn-primary btn-sm flex-1 sm:flex-none"><IconZap size={13} />Abrir</a>
+                </div>
+              </div>
+            )}
             {item?.extra_notes && (
               <p className="inset mt-3 px-3 py-2.5 text-[13px] text-[var(--ink-muted)] leading-relaxed whitespace-pre-wrap">{item.extra_notes}</p>
             )}

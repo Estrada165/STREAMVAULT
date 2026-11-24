@@ -4,6 +4,7 @@ import Sidebar, { BrandMark } from './Sidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { AnnouncementPopup } from '@/components/shared/Announcements'
 import AssistantLauncher from '@/components/shared/AssistantLauncher'
+import { TourHost } from '@/components/shared/Tour'
 import { PageLoader } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -73,6 +74,7 @@ export default function PageWrapper({ children }) {
       <Sidebar open={menuOpen} onClose={closeMenu} badges={{ tickets: ticketCount, cart: cartCount, notifs: notifCount, pending: pendingCount }} collapsed={collapsed} onToggleCollapse={toggleCollapse} onCountsChange={fetchCounts} />
       {isDistribuidor && <AnnouncementPopup />}
       {isDistribuidor && <AssistantLauncher />}
+      <TourHost />
 
       <main className="main-content">
         {/* Barra superior en móvil y tablet */}
