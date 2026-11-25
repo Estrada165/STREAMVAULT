@@ -235,7 +235,7 @@ export default function ProveedorStock() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-5 items-start">
         {/* Selector de producto */}
-        <div className="lg:sticky lg:top-6">
+        <div className="lg:sticky lg:top-6" data-tour="stock-products">
           <p className="eyebrow mb-2.5 hidden lg:block">Productos</p>
           <div className="flex lg:flex-col gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 lg:mx-0 lg:px-0 pb-1">
             {products.map(p => {
@@ -257,7 +257,7 @@ export default function ProveedorStock() {
         </div>
 
         {/* Lista */}
-        <section className="card overflow-hidden">
+        <section className="card overflow-hidden" data-tour="stock-list">
           <div className="p-4 sm:p-5 border-b border-[var(--surface-border)] space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
@@ -268,8 +268,8 @@ export default function ProveedorStock() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button className="btn-secondary btn-sm" onClick={() => { setBulkText(''); setError(''); setModal({ type: 'bulk' }) }}><IconUpload size={14} />En lote</button>
-                <button className="btn-primary btn-sm" onClick={openAdd}><IconPlus size={14} />Agregar</button>
+                <button className="btn-secondary btn-sm" data-tour="stock-bulk" onClick={() => { setBulkText(''); setError(''); setModal({ type: 'bulk' }) }}><IconUpload size={14} />En lote</button>
+                <button className="btn-primary btn-sm" data-tour="stock-add" onClick={openAdd}><IconPlus size={14} />Agregar</button>
               </div>
             </div>
             {bot && (

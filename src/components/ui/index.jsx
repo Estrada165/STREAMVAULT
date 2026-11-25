@@ -1,3 +1,4 @@
+import { RouteTourButton } from '@/components/shared/Tour'
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { IconX, IconAlertCircle, IconCheck, IconInfo, IconCopy } from '@/assets/icons'
@@ -63,7 +64,7 @@ const STAT_TONE = {
 }
 export function StatCard({ label, value, icon: Icon, color = 'neutral', sub, highlight = false, loading = false }) {
   return (
-    <div className={`card card-hover p-5 flex flex-col gap-3 min-w-0 ${highlight ? 'card-sig' : ''}`}>
+    <div className={`card card-hover p-5 flex flex-col gap-3 min-w-0 ${highlight ? 'card-sig' : ''}`} data-tour="stat">
       <div className="flex items-center justify-between gap-3">
         <span className="eyebrow truncate">{label}</span>
         {Icon && (
@@ -193,7 +194,7 @@ export function Alert({ type = 'info', children }) {
 // ============================================================
 export function PageHeader({ title, accent, subtitle, action, eyebrow }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 mb-6 md:mb-8 animate-slide-up">
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 mb-6 md:mb-8 animate-slide-up" data-tour="page-header">
       <div className="min-w-0">
         {eyebrow && <p className="eyebrow mb-2">{eyebrow}</p>}
         <h1 className="font-display text-[1.75rem] md:text-[2.125rem] leading-[1.05] text-[var(--ink)]">
@@ -201,7 +202,10 @@ export function PageHeader({ title, accent, subtitle, action, eyebrow }) {
         </h1>
         {subtitle && <p className="text-sm text-[var(--ink-muted)] mt-1.5">{subtitle}</p>}
       </div>
-      {action && <div className="flex flex-wrap items-center gap-2.5">{action}</div>}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <RouteTourButton />
+        {action && <span className="contents" data-tour="page-action">{action}</span>}
+      </div>
     </div>
   )
 }
@@ -264,7 +268,7 @@ export function Toggle({ checked, onChange, label, disabled = false }) {
 // ============================================================
 export function Tabs({ tabs, active, onChange, className = '' }) {
   return (
-    <div className={`inset flex gap-1 p-1 w-full sm:w-fit max-w-full overflow-x-auto no-scrollbar ${className}`} role="tablist">
+    <div className={`inset flex gap-1 p-1 w-full sm:w-fit max-w-full overflow-x-auto no-scrollbar ${className}`} role="tablist" data-tour="tabs">
       {tabs.map(tab => {
         const on = active === tab.value
         return (

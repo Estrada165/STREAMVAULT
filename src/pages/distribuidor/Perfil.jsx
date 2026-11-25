@@ -35,7 +35,7 @@ function PanelColors() {
 
   const dirty = (value || null) !== saved
   return (
-    <div className="card p-5 sm:p-6">
+    <div className="card p-5 sm:p-6" data-tour="profile-colors">
       <div className="flex items-center gap-3 mb-5">
         <span className="w-10 h-10 rounded-xl inset grid place-items-center text-[var(--ink-muted)] flex-shrink-0">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22a10 10 0 110-20c5.5 0 10 4 10 9a5 5 0 01-5 5h-1.8a1.7 1.7 0 00-1.2 2.9A1.7 1.7 0 0112 22z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>
@@ -251,7 +251,7 @@ export default function DistPerfil() {
         </div>
 
         <div className="xl:col-span-3 space-y-5">
-        <div className="card p-5 sm:p-6">
+        <div className="card p-5 sm:p-6" data-tour="profile-template">
           <SectionTitle icon={IconWhatsApp} title="Plantilla de WhatsApp" subtitle="El mensaje con credenciales que envías a tus clientes" />
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="space-y-3">

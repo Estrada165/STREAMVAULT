@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import { IconX, IconBook } from '@/assets/icons'
-import { TOURS } from '@/lib/tours'
+import { TOURS, ROUTE_TOURS } from '@/lib/tours'
 
 /* ══ Estado global mínimo ═════════════════════════════════ */
 let state = { id: null, step: 0, userId: null }
@@ -51,6 +51,31 @@ export function TourButton({ id, user, label = 'Ver guía' }) {
   )
 }
 
+/* ══ Guía de cada pantalla ═══════════════════════════════ */
+const routeTourId = (pathname) => ROUTE_TOURS[pathname.replace(/\/+$/, '') || '/'] || null
+
+// Se monta una vez (PageWrapper): abre la guía de la pantalla la primera vez que el usuario entra
+export function RouteTours({ user }) {
+  const { pathname } = useLocation()
+  const id = routeTourId(pathname)
+  useEffect(() => { if (user?.id) set({ userId: user.id }) }, [user?.id])
+  useAutoTour(id, user, { ready: !!id, delay: 1100 })
+  return null
+}
+
+// Botón «Ver guía» en la cabecera de cada pantalla (si esa pantalla tiene guía)
+export function RouteTourButton() {
+  const { pathname } = useLocation()
+  const id = routeTourId(pathname)
+  useStyles()
+  if (!id) return null
+  return (
+    <button type="button" className="tour-btn" onClick={() => startTour(id)} aria-label="Ver guía de esta pantalla" title="Ver guía de esta pantalla" data-tour="tour-btn">
+      <IconBook size={15} />
+    </button>
+  )
+}
+
 /* ══ Host (uno solo, en el Layout) ════════════════════════ */
 const PAD = 8, GAP = 14, M = 16
 
@@ -59,7 +84,8 @@ function findVisible(selector) {
   for (const sel of [].concat(selector)) {
     for (const el of document.querySelectorAll(sel)) {
       const r = el.getBoundingClientRect()
-      if (r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden') return el
+      // Visible y dentro de la pantalla a lo ancho (un menú lateral cerrado en móvil queda fuera)
+      if (r.width > 0 && r.height > 0 && r.right > 4 && r.left < window.innerWidth - 4 && getComputedStyle(el).visibility !== 'hidden') return el
     }
   }
   return null
@@ -96,7 +122,7 @@ export function TourHost() {
     if (first) hook(first)
     else if (cur.target) {
       // La sección puede estar cargando: se espera un momento
-      iv = setInterval(() => { const e = findVisible(cur.target); if (e || ++tries > 12) { clearInterval(iv); if (e) hook(e) } }, 150)
+      iv = setInterval(() => { const e = findVisible(cur.target); if (e || ++tries > 25) { clearInterval(iv); if (e) hook(e) } }, 150)
     }
     window.addEventListener('resize', onResize)
     window.addEventListener('scroll', measure, true)
@@ -115,8 +141,14 @@ export function TourHost() {
   const vw = window.innerWidth, vh = window.innerHeight
   const w = Math.min(340, vw - M * 2)
   const clamp = (v, a, b) => Math.min(Math.max(v, a), Math.max(a, b))
+  // Si el elemento es más alto que la pantalla, se recorta a lo visible
+  const view = rect ? (() => {
+    const top = Math.max(rect.top, PAD + 4), bottom = Math.min(rect.bottom, vh - PAD - 4)
+    return bottom > top ? { left: rect.left, top, width: rect.width, height: bottom - top, right: rect.right, bottom } : rect
+  })() : null
   let pos
-  if (rect) {
+  if (view) {
+    const rect = view
     const hx = rect.left - PAD, hy = rect.top - PAD, hw = rect.width + PAD * 2, hh = rect.height + PAD * 2
     const cx = clamp(hx + hw / 2 - w / 2, M, vw - w - M), cy = clamp(hy + hh / 2 - cardH / 2, M, vh - cardH - M)
     if (hy + hh + GAP + cardH <= vh - M)      pos = { left: cx, top: hy + hh + GAP }
@@ -130,7 +162,7 @@ export function TourHost() {
   return createPortal(
     <div className="tour-layer" role="dialog" aria-modal="true" aria-labelledby="tour-title">
       {rect
-        ? <div className="tour-hole" style={{ left: rect.left - PAD, top: rect.top - PAD, width: rect.width + PAD * 2, height: rect.height + PAD * 2 }} />
+        ? <div className="tour-hole" style={{ left: view.left - PAD, top: view.top - PAD, width: view.width + PAD * 2, height: view.height + PAD * 2 }} />
         : <div className="tour-veil" />}
       <div key={`${id}-${step}`} ref={cardRef} className="tour-card" style={{ ...pos, width: w }}>
         <button className="tour-x" onClick={finish} aria-label="Cerrar guía"><IconX size={15} /></button>

@@ -103,7 +103,7 @@ export default function Carrito() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           {/* Productos */}
-          <div className="lg:col-span-2 space-y-3 stagger">
+          <div className="lg:col-span-2 space-y-3 stagger" data-tour="cart-items">
             {grouped.map(item => (
               <div key={item.id} className="card p-4 flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-3">
                 <CartItemThumb item={item} />
@@ -137,7 +137,7 @@ export default function Carrito() {
           </div>
 
           {/* Resumen */}
-          <aside className="card p-5 space-y-4 lg:sticky lg:top-6">
+          <aside className="card p-5 space-y-4 lg:sticky lg:top-6" data-tour="cart-summary">
             <h2 className="font-display font-semibold text-lg">Resumen</h2>
             <div className="space-y-2">
               {grouped.map(item => (

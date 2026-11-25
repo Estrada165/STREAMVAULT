@@ -18,7 +18,7 @@ export default function DistSaldo() {
     <div>
       <PageHeader title="Mi" accent="saldo" subtitle="Cada recarga, compra y devolución, con el saldo que te quedó" />
 
-      <section className="card p-5 sm:p-6 mb-6 flex flex-wrap items-center gap-5 animate-slide-up">
+      <section className="card p-5 sm:p-6 mb-6 flex flex-wrap items-center gap-5 animate-slide-up" data-tour="saldo-card">
         <span className="w-14 h-14 rounded-2xl grid place-items-center bg-[var(--a-soft)] border border-[var(--a-line)] text-[var(--a)]"><IconWallet size={24} /></span>
         <div className="flex-1 min-w-[180px]">
           <p className="eyebrow">Saldo disponible</p>

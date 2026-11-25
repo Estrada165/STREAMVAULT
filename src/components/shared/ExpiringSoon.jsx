@@ -46,7 +46,7 @@ export default function ExpiringSoon({ orders, exchangeRate = 3.5 }) {
   }
 
   return (
-    <section className="card p-4 sm:p-5 mb-6 animate-slide-up" aria-label="Pedidos que vencen pronto">
+    <section className="card p-4 sm:p-5 mb-6 animate-slide-up" aria-label="Pedidos que vencen pronto" data-tour="expiring">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
           <span className="w-10 h-10 rounded-xl grid place-items-center bg-[var(--status-yellow-bg)] border border-[var(--status-yellow-border)] text-[var(--status-yellow)]"><IconClock size={18} /></span>

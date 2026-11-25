@@ -258,7 +258,7 @@ export default function Tienda() {
           <p className="text-sm text-[var(--ink-muted)] mt-1.5">{products.length ? `${products.length} productos disponibles para vender hoy` : 'Elige lo que quieres vender hoy'}</p>
         </div>
         {/* En escritorio el saldo ya está en el menú lateral; aquí solo se muestra en móvil */}
-        <div className="lg:hidden w-full sm:w-auto flex items-center gap-3 rounded-2xl pl-4 pr-2 py-2 bg-[var(--a-soft)] border border-[var(--a-line)]">
+        <div className="lg:hidden w-full sm:w-auto flex items-center gap-3 rounded-2xl pl-4 pr-2 py-2 bg-[var(--a-soft)] border border-[var(--a-line)]" data-tour="store-balance">
           <div className="flex-1 min-w-0 flex items-baseline gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-[.12em] text-[var(--ink-muted)]">Saldo</span>
             <span className="font-mono text-lg text-[var(--ink)] truncate">{formatUSD(balance)}</span>
@@ -271,7 +271,7 @@ export default function Tienda() {
 
       {/* Métodos de recarga */}
       {paymentMethods.length > 0 && (
-        <div className="flex items-center gap-2 mb-5 overflow-x-auto no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0 animate-slide-up" style={{ animationDelay: '.05s' }}>
+        <div className="flex items-center gap-2 mb-5 overflow-x-auto no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0 animate-slide-up" style={{ animationDelay: '.05s' }} data-tour="store-methods">
           <span className="eyebrow flex-shrink-0 mr-1">Recarga con</span>
           {paymentMethods.map(m => {
             const meta = getMethodMeta(m.method_key)
@@ -285,7 +285,7 @@ export default function Tienda() {
       )}
 
       {/* Buscador y filtros */}
-      <div className="flex flex-col sm:flex-row gap-2.5 mb-3 animate-slide-up" style={{ animationDelay: '.08s' }}>
+      <div className="flex flex-col sm:flex-row gap-2.5 mb-3 animate-slide-up" style={{ animationDelay: '.08s' }} data-tour="store-search">
         <label className="relative flex-1">
           <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink-faint)] pointer-events-none" />
           <input className="input input-icon" placeholder="Buscar Netflix, Disney, perfil..." value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar producto" />
@@ -300,7 +300,7 @@ export default function Tienda() {
       </div>
 
       {platforms.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mb-5 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mb-5 -mx-4 px-4 sm:mx-0 sm:px-0" data-tour="store-platforms">
           <button onClick={() => setFilterPlatform('all')} className={`btn-secondary btn-sm flex-shrink-0 ${filterPlatform === 'all' ? 'is-down' : ''}`}>Todas</button>
           {platforms.map(p => (
             <button key={p.id} onClick={() => setFilterPlatform(f => f === p.id ? 'all' : p.id)} className={`btn-secondary btn-sm flex-shrink-0 !pl-1.5 ${filterPlatform === p.id ? 'is-down' : ''}`}>
@@ -322,7 +322,7 @@ export default function Tienda() {
             />
           </div>
         ) : (
-          <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 stagger">
+          <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 stagger" data-tour="store-grid">
             {filtered.map(p => (
               <ProductCard key={p.id} product={p} exchangeRate={exchangeRate} stockCount={stockCounts[p.id] || 0} onBuy={handleBuy} />
             ))}

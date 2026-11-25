@@ -206,7 +206,7 @@ export default function ProveedorSoporte() {
       {loading ? <SkeletonList rows={4} /> : tickets.length === 0 ? (
         <div className="card"><EmptyState icon={IconHeadphones} title={tab === 'abierto' ? 'Sin tickets abiertos' : 'Nada por aquí'} description={tab === 'abierto' ? 'Cuando un distribuidor reporte un problema aparecerá aquí.' : 'No hay tickets en esta categoría.'} /></div>
       ) : (
-        <div className="space-y-3 stagger">
+        <div className="space-y-3 stagger" data-tour="tickets-list">
           {tickets.map(t => {
             const distPhone = (t.users?.phone || '').replace(/\D/g, '')
             return (

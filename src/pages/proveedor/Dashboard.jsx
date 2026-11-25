@@ -152,7 +152,7 @@ export default function ProveedorDashboard() {
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           {/* Gráfico de ventas */}
-          <section className="card p-5 sm:p-6 xl:col-span-2 animate-slide-up">
+          <section className="card p-5 sm:p-6 xl:col-span-2 animate-slide-up" data-tour="dash-chart">
             <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
               <div>
                 <p className="eyebrow">Ventas · últimos 7 días</p>
@@ -206,7 +206,7 @@ export default function ProveedorDashboard() {
           </section>
 
           {/* Lo más vendido */}
-          <section className="card p-5 sm:p-6 animate-slide-up" style={{ animationDelay: '.06s' }}>
+          <section className="card p-5 sm:p-6 animate-slide-up" style={{ animationDelay: '.06s' }} data-tour="dash-top">
             <p className="eyebrow mb-4">Lo más vendido</p>
             {topProducts.length === 0 ? <p className="text-sm text-[var(--ink-muted)]">Aún no hay ventas.</p> : (
               <ul className="space-y-3.5">

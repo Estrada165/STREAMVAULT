@@ -101,7 +101,7 @@ function DistributorBalance() {
   const go = () => navigate('/tienda?recargar=1')
   return (
     <>
-      <div className="sb-hide mb-3 rounded-2xl border border-[var(--a-line)] bg-[var(--a-soft)] px-3.5 py-3 flex items-center gap-3">
+      <div className="sb-hide mb-3 rounded-2xl border border-[var(--a-line)] bg-[var(--a-soft)] px-3.5 py-3 flex items-center gap-3" data-tour="side-balance">
         <button onClick={() => navigate('/saldo')} className="min-w-0 flex-1 text-left group" title="Ver movimientos">
           <p className="text-[10.5px] font-semibold uppercase tracking-[.12em] text-[var(--ink-faint)] group-hover:text-[var(--a)] transition-colors">Tu saldo →</p>
           <p className="font-mono text-[1.3rem] font-medium text-[var(--ink)] leading-tight mt-0.5 truncate">{formatUSD(balance)}</p>
@@ -166,7 +166,7 @@ export default function Sidebar({ open, onClose, badges = {}, collapsed = false,
         {nav.map(({ to, label, icon: Icon, end, badgeKey }) => {
           const badge = badgeKey ? badges[badgeKey] || 0 : 0
           return (
-            <NavLink key={to} to={to} end={end} data-tip={label} aria-label={label} className={({ isActive }) => `nav-item sb-tip ${isActive ? 'active' : ''}`}>
+            <NavLink key={to} to={to} end={end} data-tip={label} aria-label={label} data-tour={`nav${to.replace(/\//g, '-')}`} className={({ isActive }) => `nav-item sb-tip ${isActive ? 'active' : ''}`}>
               {({ isActive }) => (
                 <>
                   <Icon size={18} />

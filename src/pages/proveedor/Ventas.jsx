@@ -384,7 +384,7 @@ const stocks = allStocks
       ) : (
         <>
           {/* Escritorio: tabla */}
-          <div className="table-wrapper hidden lg:block">
+          <div className="table-wrapper hidden lg:block" data-tour="sales-list">
             <table>
               <thead>
                 <tr><th>Producto</th><th>Distribuidor · cliente</th><th>Precio</th><th>Estado</th><th className="!text-right">Acciones</th></tr>

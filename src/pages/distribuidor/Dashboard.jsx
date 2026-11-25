@@ -163,7 +163,7 @@ export default function DistDashboard() {
       ) : (
         <>
           {search && <p className="text-xs text-[var(--ink-faint)] mb-3">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''} para "{search}"</p>}
-          <div className="flex flex-col gap-3 stagger">
+          <div className="flex flex-col gap-3 stagger" data-tour="orders-list">
             {filtered.map(order => (
               <OrderCard key={order.id} order={order} template={template} exchangeRate={exchangeRate} onCredentialsUpdated={fetchOrders}
                 access={access[order.id]} onAccessChange={mergeAccess} tourFirst={order.id === firstWithLink} />

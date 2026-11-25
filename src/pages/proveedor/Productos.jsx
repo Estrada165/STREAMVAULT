@@ -296,7 +296,7 @@ export default function ProveedorProductos() {
             ]} active={view} onChange={setView} />
           </div>
 
-          <div className="grid gap-4 grid-cols-1 min-[520px]:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 stagger">
+          <div className="grid gap-4 grid-cols-1 min-[520px]:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 stagger" data-tour="prod-grid">
             {visibleProducts.map(p => {
               const stock = stockCounts[p.id] || 0
               const platformName = getDisplayPlatformName(p)

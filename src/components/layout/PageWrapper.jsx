@@ -4,7 +4,7 @@ import Sidebar, { BrandMark } from './Sidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { AnnouncementPopup } from '@/components/shared/Announcements'
 import AssistantLauncher from '@/components/shared/AssistantLauncher'
-import { TourHost } from '@/components/shared/Tour'
+import { TourHost, RouteTours } from '@/components/shared/Tour'
 import { PageLoader } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -75,11 +75,12 @@ export default function PageWrapper({ children }) {
       {isDistribuidor && <AnnouncementPopup />}
       {isDistribuidor && <AssistantLauncher />}
       <TourHost />
+      <RouteTours user={profile} />
 
       <main className="main-content">
         {/* Barra superior en móvil y tablet */}
         <header className="topbar">
-          <button className="btn-secondary btn-icon" onClick={() => setMenuOpen(true)} aria-label="Abrir menú">
+          <button className="btn-secondary btn-icon" onClick={() => setMenuOpen(true)} aria-label="Abrir menú" data-tour="menu-btn">
             <IconMenu size={18} />
           </button>
           <div className="min-w-0 flex-1 flex justify-center"><BrandMark compact /></div>

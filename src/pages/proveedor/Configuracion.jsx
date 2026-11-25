@@ -167,7 +167,7 @@ export default function ProveedorConfiguracion() {
       {tab === 'tienda' && (
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start animate-fade-in">
           {/* Marca */}
-          <section className="card p-5 sm:p-6">
+          <section className="card p-5 sm:p-6" data-tour="cfg-brand">
             <SectionTitle icon={<IconStore size={18} />} title="Tu marca" subtitle="Lo que ven tus distribuidores al entrar" />
 
             <div className="flex items-center gap-4 mb-5">
@@ -196,7 +196,7 @@ export default function ProveedorConfiguracion() {
           </section>
 
           {/* Acceso */}
-          <section className="card p-5 sm:p-6">
+          <section className="card p-5 sm:p-6" data-tour="cfg-invite">
             <SectionTitle icon={<IconSettings size={18} />} title="Invitación y soporte" />
             <div className="space-y-4">
               <div>

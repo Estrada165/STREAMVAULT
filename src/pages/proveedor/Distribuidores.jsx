@@ -114,7 +114,7 @@ export default function ProveedorDistribuidores() {
       </div>
 
       {provider?.slug && (
-        <div className="card p-4 sm:p-5 mb-6 grid sm:grid-cols-[1fr_minmax(0,320px)] gap-4 items-center animate-slide-up">
+        <div className="card p-4 sm:p-5 mb-6 grid sm:grid-cols-[1fr_minmax(0,320px)] gap-4 items-center animate-slide-up" data-tour="dist-invite">
           <div>
             <p className="font-semibold text-[var(--ink)]">Invita distribuidores</p>
             <p className="text-[13px] text-[var(--ink-muted)] mt-0.5">Comparte tu código. Se registran con él y aparecen aquí para que los actives.</p>
@@ -142,7 +142,7 @@ export default function ProveedorDistribuidores() {
             description={distributors.length ? 'Prueba con otra búsqueda o filtro.' : 'Comparte tu código de invitación para que se registren.'} />
         </div>
       ) : (
-        <div className="card divide-y divide-[var(--surface-border)] overflow-hidden">
+        <div className="card divide-y divide-[var(--surface-border)] overflow-hidden" data-tour="dist-list">
           {filtered.map(d => {
             const bal = parseFloat(balances[d.id] || 0)
             const phone = (d.phone || '').replace(/\D/g, '')

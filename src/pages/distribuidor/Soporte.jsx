@@ -59,7 +59,7 @@ export default function DistSoporte() {
           />
         </div>
       ) : (
-        <div className="space-y-3 stagger">
+        <div className="space-y-3 stagger" data-tour="dist-tickets">
           {tickets.map(t => {
             const waMsg =
               `Hola! Soy *${distName}*\n\n` +
